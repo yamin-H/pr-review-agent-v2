@@ -14,7 +14,7 @@ from review.prompts import REVIEWER_SYSTEM_PROMPT, format_review_prompt
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 
 class LLMReviewError(Exception):
