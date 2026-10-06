@@ -5,7 +5,14 @@ from review.findings import Finding, Severity
 from review.validate import validate_findings_against_diff
 
 
-def add_finding(state: AgentState, file: str, line: int, title: str, body: str, severity: str = "medium",) -> str:
+def add_finding(
+    state: AgentState,
+    file: str,
+    line: int,
+    title: str,
+    body: str,
+    severity: str = "medium",
+) -> str:
     """Validate a candidate finding against the diff and record it if legitimate.
 
     Rejects findings whose line number does not exist within the added diff lines.
