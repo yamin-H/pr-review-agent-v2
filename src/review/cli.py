@@ -7,6 +7,8 @@ from review.chunker import chunk_diff
 from review.diff import added_lines
 from review.findings import Finding, ReviewOutput
 from review.llm import GroqReviewer
+from review.sandbox.prover import ProofEngine
+from review.sandbox.synthesizer import ReproductionSynthesizer
 from review.validate import validate_finding_lines
 from review.verifier import FindingVerifier
 
@@ -17,7 +19,10 @@ def review_diff(
     pr_title: str | None = None,
     pr_description: str | None = None,
     verifier: FindingVerifier | None = None,
+    proof_engine: ProofEngine | None = None,
     verify: bool = False,
+    reproduce: bool = False,
+    repo_root: Path | None = None,
 ) -> ReviewOutput:
     """Run an end-to-end review on a unified diff text string."""
     if reviewer is None:
@@ -63,6 +68,18 @@ def review_diff(
         )
         all_valid_findings = verified_findings
 
+    # Optional reproduction proof step in execution sandbox
+    if reproduce and all_valid_findings:
+        if proof_engine is None:
+            proof_engine = ProofEngine(
+                synthesizer=ReproductionSynthesizer(reviewer=reviewer)
+            )
+        all_valid_findings = proof_engine.prove_findings(
+            findings=all_valid_findings,
+            diff_text=diff_text,
+            repo_root=repo_root,
+        )
+
     consolidated_summary = (
         " ".join(chunk_summaries)
         if chunk_summaries
@@ -88,8 +105,14 @@ def print_human_report(review: ReviewOutput) -> None:
         print(f"Findings ({len(review.findings)}):")
         for i, finding in enumerate(review.findings, 1):
             severity_tag = f"[{finding.severity.value.upper()}]"
-            print(f"\n  {i}. {severity_tag} {finding.file}:{finding.line} - {finding.title}")
+            repro_tag = " [PROVEN IN SANDBOX]" if finding.is_reproduced else ""
+            print(
+                f"\n  {i}. {severity_tag}{repro_tag} "
+                f"{finding.file}:{finding.line} - {finding.title}"
+            )
             print(f"     {finding.body}")
+            if finding.reproduction_output:
+                print(f"     [Sandbox Proof Output]: {finding.reproduction_output[:120]}...")
 
     print("\n" + "=" * 80)
 
@@ -109,6 +132,11 @@ def main(argv: list[str] | None = None) -> int:
         "--verify",
         action="store_true",
         help="Run adversarial verification filter to challenge and drop false positives",
+    )
+    parser.add_argument(
+        "--reproduce",
+        action="store_true",
+        help="Synthesize and run minimal reproduction tests in the execution sandbox",
     )
     parser.add_argument(
         "--json",
@@ -140,6 +168,7 @@ def main(argv: list[str] | None = None) -> int:
             pr_title=args.title,
             pr_description=args.description,
             verify=args.verify,
+            reproduce=args.reproduce,
         )
     except Exception as e:
         print(f"Error executing review: {e}", file=sys.stderr)

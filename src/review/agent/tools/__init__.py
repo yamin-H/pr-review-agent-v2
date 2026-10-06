@@ -5,9 +5,14 @@ from typing import Any
 
 from review.agent.state import AgentState
 from review.agent.tools.diff_tools import get_diff, list_changed_files
-from review.agent.tools.findings_tools import add_finding, verify_finding
+from review.agent.tools.findings_tools import (
+    add_finding,
+    run_reproduction_test,
+    verify_finding,
+)
 from review.agent.tools.repo_tools import read_file, search_code
 from review.agent.tools.submit import submit_review
+from review.sandbox.prover import ProofEngine
 from review.verifier import FindingVerifier
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -137,6 +142,30 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "run_reproduction_test",
+            "description": (
+                "Execute a reproduction test in an isolated sandbox to prove a suspected bug. "
+                "Optionally supply custom Python test code or let the engine synthesize one."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "finding_index": {
+                        "type": "integer",
+                        "description": "Finding number/index to reproduce (1-indexed or 0-indexed)",
+                    },
+                    "test_code": {
+                        "type": "string",
+                        "description": "Optional Python test script content to run in the sandbox",
+                    },
+                },
+                "required": ["finding_index"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "submit_review",
             "description": "Complete the review by providing an overall summary comment.",
             "parameters": {
@@ -160,6 +189,7 @@ def execute_tool(
     state: AgentState,
     repo_root: Path,
     verifier: FindingVerifier | None = None,
+    proof_engine: ProofEngine | None = None,
 ) -> str:
     """Safely dispatch and execute a tool call requested by the agent."""
     try:
@@ -198,6 +228,15 @@ def execute_tool(
                 verifier=verifier,
             )
 
+        elif tool_name == "run_reproduction_test":
+            return run_reproduction_test(
+                state=state,
+                finding_index=int(arguments.get("finding_index", 0)),
+                repo_root=repo_root,
+                test_code=arguments.get("test_code"),
+                proof_engine=proof_engine,
+            )
+
         elif tool_name == "submit_review":
             return submit_review(state=state, summary=arguments.get("summary", ""))
 
@@ -215,6 +254,7 @@ __all__ = [
     "get_diff",
     "list_changed_files",
     "read_file",
+    "run_reproduction_test",
     "search_code",
     "submit_review",
     "verify_finding",

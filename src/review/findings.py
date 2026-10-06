@@ -16,6 +16,15 @@ class Finding(BaseModel):
     title: str = Field(..., description="Brief one-line summary of the finding")
     body: str = Field(..., description="Detailed explanation of the issue and recommendation")
     severity: Severity = Field(default=Severity.MEDIUM, description="Finding severity level")
+    reproduction_code: str | None = Field(
+        default=None, description="Minimal standalone Python reproduction test script"
+    )
+    reproduction_output: str | None = Field(
+        default=None, description="Execution stdout/traceback proving the defect"
+    )
+    is_reproduced: bool | None = Field(
+        default=None, description="Whether the defect was confirmed via execution"
+    )
 
 
 class ReviewOutput(BaseModel):

@@ -1,7 +1,10 @@
-"""Tools for proposing and validating inline review findings against diff ground truth."""
+"""Tools for proposing, validating, and reproducing inline review findings."""
+
+from pathlib import Path
 
 from review.agent.state import AgentState
 from review.findings import Finding, Severity
+from review.sandbox.prover import ProofEngine
 from review.validate import validate_findings_against_diff
 from review.verifier import FindingVerifier, VerificationDecision
 
@@ -98,4 +101,57 @@ def verify_finding(
         return (
             f"CONFIRMED: Finding #{finding_index} '{finding.title}' withstood "
             f"adversarial challenge.\nRationale: {result.rationale}"
+        )
+
+
+def run_reproduction_test(
+    state: AgentState,
+    finding_index: int,
+    repo_root: Path | None = None,
+    test_code: str | None = None,
+    proof_engine: ProofEngine | None = None,
+) -> str:
+    """Attempt to reproduce a proposed finding in the execution sandbox."""
+    if not state.findings:
+        return "No findings to reproduce. State findings list is empty."
+
+    target_idx = finding_index
+    if 1 <= target_idx <= len(state.findings):
+        target_idx -= 1
+    elif not (0 <= target_idx < len(state.findings)):
+        return (
+            f"Error: Invalid finding index {finding_index}. "
+            f"Valid range is 1 to {len(state.findings)} (or 0 to {len(state.findings) - 1})."
+        )
+
+    finding = state.findings[target_idx]
+    if proof_engine is None:
+        proof_engine = ProofEngine()
+
+    updated_finding, result = proof_engine.attempt_reproduction(
+        finding=finding,
+        diff_text=state.diff,
+        repo_root=repo_root,
+        custom_test_code=test_code,
+    )
+    state.findings[target_idx] = updated_finding
+
+    if result.reproduced:
+        return (
+            f"REPRODUCED: Finding #{finding_index} '{finding.title}' was successfully "
+            f"reproduced in the sandbox!\n"
+            f"Exit Code: {result.exit_code}\n"
+            f"Duration: {result.duration_ms:.0f}ms\n"
+            f"Failure Summary: {result.error_summary or 'Assertion/Exception triggered'}"
+        )
+    elif result.timed_out:
+        return (
+            f"TIMEOUT: Sandbox execution timed out while attempting to reproduce "
+            f"Finding #{finding_index}."
+        )
+    else:
+        return (
+            f"NOT REPRODUCED: Finding #{finding_index} did not trigger an expected failure "
+            f"in the sandbox (exit code {result.exit_code}).\n"
+            f"Output: {result.error_summary or result.stdout or 'No failure observed'}"
         )

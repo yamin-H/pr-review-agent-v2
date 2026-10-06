@@ -10,6 +10,8 @@ from review.agent.state import AgentState
 from review.agent.tools import TOOL_DEFINITIONS, execute_tool
 from review.findings import ReviewOutput
 from review.llm import GroqReviewer
+from review.sandbox.prover import ProofEngine
+from review.sandbox.synthesizer import ReproductionSynthesizer
 from review.security import wrap_untrusted
 from review.verifier import FindingVerifier
 
@@ -27,7 +29,9 @@ Core Workflow:
    - Call `read_file` or `search_code` to check caller functions and definitions.
 3. Propose Findings: Call `add_finding` for each genuine defect. Line numbers MUST be valid
    new-file line numbers in the diff.
-4. Verify (Optional): Call `verify_finding` to stress-test candidate findings before submitting.
+4. Verify & Reproduce (Optional):
+   - Call `verify_finding` to stress-test candidate findings before submitting.
+   - Call `run_reproduction_test` to test your defect hypothesis in an isolated sandbox.
 5. Conclude: Once you have investigated all changes, call `submit_review` with an overall summary.
 
 Security Directives:
@@ -45,13 +49,19 @@ class AgentRunner:
         llm_client: Any | None = None,
         budget_config: BudgetConfig | None = None,
         verifier: FindingVerifier | None = None,
+        proof_engine: ProofEngine | None = None,
         enable_verifier: bool = False,
+        enable_reproduction: bool = False,
     ) -> None:
         self.reviewer = reviewer or GroqReviewer()
         self.llm_client = llm_client
         self.budget_config = budget_config or BudgetConfig()
         self.verifier = verifier or FindingVerifier(reviewer=self.reviewer)
+        self.proof_engine = proof_engine or ProofEngine(
+            synthesizer=ReproductionSynthesizer(reviewer=self.reviewer)
+        )
         self.enable_verifier = enable_verifier
+        self.enable_reproduction = enable_reproduction
 
     def _call_llm(
         self,
@@ -180,6 +190,7 @@ class AgentRunner:
                     state=state,
                     repo_root=repo_root,
                     verifier=self.verifier,
+                    proof_engine=self.proof_engine,
                 )
 
                 # 3. Record in State Trace
@@ -241,6 +252,18 @@ class AgentRunner:
                 pr_description=pr_description,
             )
             state.findings = verified_findings
+
+        if self.enable_reproduction and state.findings:
+            logger.info(
+                "Executing sandbox reproduction pass on %d findings...",
+                len(state.findings),
+            )
+            proven_findings = self.proof_engine.prove_findings(
+                findings=state.findings,
+                diff_text=diff_text,
+                repo_root=repo_root,
+            )
+            state.findings = proven_findings
 
         return ReviewOutput(
             summary=state.final_summary,
