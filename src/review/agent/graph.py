@@ -183,6 +183,13 @@ class AgentRunner:
                     logger.warning("Agent terminated by budget guardrail: %s", reason)
                     break
 
+                logger.info(
+                    "  [Step %d] Executing tool: %s(%s)",
+                    state.step_count + 1,
+                    tool_name,
+                    json.dumps(tool_input),
+                )
+
                 # 2. Execute Action
                 output = execute_tool(
                     tool_name=tool_name,
@@ -195,6 +202,7 @@ class AgentRunner:
 
                 # 3. Record in State Trace
                 output_summary = output[:200] + "..." if len(output) > 200 else output
+                logger.info("    -> Output: %s", output_summary.replace('\n', ' '))
                 state.record_action(
                     tool_name=tool_name,
                     tool_input=tool_input,

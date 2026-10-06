@@ -129,6 +129,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--title", help="Optional PR title")
     parser.add_argument("--description", help="Optional PR description")
     parser.add_argument(
+        "--agent",
+        action="store_true",
+        help="Run the autonomous Plan-Act-Observe agent loop with tools",
+    )
+    parser.add_argument(
         "--verify",
         action="store_true",
         help="Run adversarial verification filter to challenge and drop false positives",
@@ -162,14 +167,29 @@ def main(argv: list[str] | None = None) -> int:
     reviewer = GroqReviewer(model=args.model)
 
     try:
-        result = review_diff(
-            diff_text=diff_text,
-            reviewer=reviewer,
-            pr_title=args.title,
-            pr_description=args.description,
-            verify=args.verify,
-            reproduce=args.reproduce,
-        )
+        if args.agent:
+            from review.agent.graph import AgentRunner
+
+            runner = AgentRunner(
+                reviewer=reviewer,
+                enable_verifier=args.verify,
+                enable_reproduction=args.reproduce,
+            )
+            result = runner.review_to_output(
+                diff_text=diff_text,
+                repo_root=Path.cwd(),
+                pr_title=args.title or "",
+                pr_description=args.description or "",
+            )
+        else:
+            result = review_diff(
+                diff_text=diff_text,
+                reviewer=reviewer,
+                pr_title=args.title,
+                pr_description=args.description,
+                verify=args.verify,
+                reproduce=args.reproduce,
+            )
     except Exception as e:
         print(f"Error executing review: {e}", file=sys.stderr)
         return 1
