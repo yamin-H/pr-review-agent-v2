@@ -59,8 +59,10 @@ def test_groq_reviewer_raises_after_exceeding_max_retries() -> None:
         reviewer.review_chunk("diff content", max_retries=2, backoff_seconds=0.01)
 
 
-def test_groq_reviewer_missing_api_key_raises() -> None:
+def test_groq_reviewer_missing_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     reviewer = GroqReviewer(api_key=None, client=None)
-    reviewer.api_key = None
+    reviewer.client = None
     with pytest.raises(LLMReviewError, match="GROQ_API_KEY is not set"):
         reviewer.review_chunk("diff")
+
