@@ -1,0 +1,56 @@
+{
+  "timestamp": "2026-10-06T15:43:56.197849+00:00",
+  "model": "openai/gpt-oss-120b",
+  "mode": "Single-Shot + Verifier",
+  "summary": {
+    "total_cases": 3,
+    "buggy_cases": 2,
+    "clean_cases": 1,
+    "mean_precision": 0.75,
+    "mean_recall": 1.0,
+    "mean_line_accuracy": 0.0,
+    "clean_false_positive_rate": 0.0,
+    "mean_latency_ms": 18833.19610000035,
+    "case_results": [
+      {
+        "case_id": "clean-httpx-type-hints",
+        "is_clean": true,
+        "reported_count": 0,
+        "ground_truth_count": 0,
+        "true_positives": 0,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "line_accuracy": 1.0,
+        "latency_ms": 6423.2291000007535
+      },
+      {
+        "case_id": "szz-flask-unhandled-decode",
+        "is_clean": false,
+        "reported_count": 1,
+        "ground_truth_count": 1,
+        "true_positives": 1,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "line_accuracy": 0.0,
+        "latency_ms": 20263.537499999074
+      },
+      {
+        "case_id": "szz-requests-cve-2018-18074",
+        "is_clean": false,
+        "reported_count": 2,
+        "ground_truth_count": 1,
+        "true_positives": 1,
+        "false_positives": 1,
+        "false_negatives": 0,
+        "precision": 0.5,
+        "recall": 1.0,
+        "line_accuracy": 0.0,
+        "latency_ms": 29812.821700001223
+      }
+    ]
+  }
+}
