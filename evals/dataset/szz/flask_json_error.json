@@ -1,0 +1,16 @@
+{
+  "id": "szz-flask-unhandled-decode",
+  "repo": "pallets/flask",
+  "url": "https://github.com/pallets/flask/commit/4582e04",
+  "title": "Request get_json unhandled JSON decode exception",
+  "diff": "diff --git a/flask/wrappers.py b/flask/wrappers.py\n--- a/flask/wrappers.py\n+++ b/flask/wrappers.py\n@@ -80,3 +80,5 @@ class Request(object):\n     def get_json(self, force=False, silent=False):\n         data = self.get_data()\n+        # Bug: json.loads called directly without guarding against malformed payload\n+        return json.loads(data)\n",
+  "ground_truth": [
+    {
+      "file": "flask/wrappers.py",
+      "line": 84,
+      "description": "Calling json.loads without handling JSONDecodeError causes unhandled 500 crashes instead of 400 Bad Request.",
+      "severity": "medium"
+    }
+  ],
+  "is_clean": false
+}

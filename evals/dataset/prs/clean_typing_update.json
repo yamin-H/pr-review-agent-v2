@@ -1,0 +1,9 @@
+{
+  "id": "clean-httpx-type-hints",
+  "repo": "encode/httpx",
+  "url": "https://github.com/encode/httpx/pull/1200",
+  "title": "Add type annotations to client timeout properties",
+  "diff": "diff --git a/httpx/_models.py b/httpx/_models.py\n--- a/httpx/_models.py\n+++ b/httpx/_models.py\n@@ -50,3 +50,4 @@ class Timeout:\n+    @property\n     def connect(self) -> float | None:\n         return self._connect\n",
+  "ground_truth": [],
+  "is_clean": true
+}

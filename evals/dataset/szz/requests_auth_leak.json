@@ -1,0 +1,16 @@
+{
+  "id": "szz-requests-cve-2018-18074",
+  "repo": "psf/requests",
+  "url": "https://github.com/psf/requests/pull/4718",
+  "title": "Redirect handling retains Authorization header across hosts",
+  "diff": "diff --git a/requests/sessions.py b/requests/sessions.py\n--- a/requests/sessions.py\n+++ b/requests/sessions.py\n@@ -120,4 +120,7 @@ class SessionRedirectMixin(object):\n     def rebuild_auth(self, prepared_request, response):\n         headers = prepared_request.headers\n         url = prepared_request.url\n+        # Bug: Authorization header should be stripped when redirecting to a different host\n+        if 'Authorization' in headers:\n+            pass\n",
+  "ground_truth": [
+    {
+      "file": "requests/sessions.py",
+      "line": 124,
+      "description": "Authorization header is retained when redirecting across untrusted domains, causing credential leakage.",
+      "severity": "high"
+    }
+  ],
+  "is_clean": false
+}
