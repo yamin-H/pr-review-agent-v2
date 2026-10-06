@@ -8,6 +8,7 @@ from review.diff import added_lines
 from review.findings import Finding, ReviewOutput
 from review.llm import GroqReviewer
 from review.validate import validate_finding_lines
+from review.verifier import FindingVerifier
 
 
 def review_diff(
@@ -15,6 +16,8 @@ def review_diff(
     reviewer: GroqReviewer | None = None,
     pr_title: str | None = None,
     pr_description: str | None = None,
+    verifier: FindingVerifier | None = None,
+    verify: bool = False,
 ) -> ReviewOutput:
     """Run an end-to-end review on a unified diff text string."""
     if reviewer is None:
@@ -48,6 +51,18 @@ def review_diff(
         if chunk_review.summary:
             chunk_summaries.append(chunk_review.summary)
 
+    # Optional adversarial verification step to filter false positives
+    if verify and all_valid_findings:
+        if verifier is None:
+            verifier = FindingVerifier(reviewer=reviewer)
+        verified_findings, _ = verifier.verify_findings(
+            findings=all_valid_findings,
+            diff_text=diff_text,
+            pr_title=pr_title or "",
+            pr_description=pr_description or "",
+        )
+        all_valid_findings = verified_findings
+
     consolidated_summary = (
         " ".join(chunk_summaries)
         if chunk_summaries
@@ -63,7 +78,7 @@ def review_diff(
 def print_human_report(review: ReviewOutput) -> None:
     """Print review results in a clean, professional human-readable terminal format."""
     print("=" * 80)
-    print("AUTOMONOMOUS PR REVIEW REPORT")
+    print("AUTONOMOUS PR REVIEW REPORT")
     print("=" * 80)
     print(f"\nSummary:\n{review.summary}\n")
 
@@ -81,7 +96,7 @@ def print_human_report(review: ReviewOutput) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point for running reviews on diff files or piped stdin."""
-    parser = argparse.ArgumentParser(description="Autonomous PR Review Agent (v2) - Phase 1 CLI")
+    parser = argparse.ArgumentParser(description="Autonomous PR Review Agent (v2) - CLI")
     parser.add_argument(
         "diff_file",
         nargs="?",
@@ -90,6 +105,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", help="Groq model name override")
     parser.add_argument("--title", help="Optional PR title")
     parser.add_argument("--description", help="Optional PR description")
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Run adversarial verification filter to challenge and drop false positives",
+    )
     parser.add_argument(
         "--json",
         action="store_true",
@@ -119,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
             reviewer=reviewer,
             pr_title=args.title,
             pr_description=args.description,
+            verify=args.verify,
         )
     except Exception as e:
         print(f"Error executing review: {e}", file=sys.stderr)

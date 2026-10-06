@@ -5,9 +5,10 @@ from typing import Any
 
 from review.agent.state import AgentState
 from review.agent.tools.diff_tools import get_diff, list_changed_files
-from review.agent.tools.findings_tools import add_finding
+from review.agent.tools.findings_tools import add_finding, verify_finding
 from review.agent.tools.repo_tools import read_file, search_code
 from review.agent.tools.submit import submit_review
+from review.verifier import FindingVerifier
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -116,6 +117,26 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "verify_finding",
+            "description": (
+                "Adversarially challenge and verify a candidate finding by its number or index. "
+                "Disproves false positives or suggests revisions."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "finding_index": {
+                        "type": "integer",
+                        "description": "Number of the finding to verify (1-indexed or 0-indexed)",
+                    },
+                },
+                "required": ["finding_index"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "submit_review",
             "description": "Complete the review by providing an overall summary comment.",
             "parameters": {
@@ -138,6 +159,7 @@ def execute_tool(
     arguments: dict[str, Any],
     state: AgentState,
     repo_root: Path,
+    verifier: FindingVerifier | None = None,
 ) -> str:
     """Safely dispatch and execute a tool call requested by the agent."""
     try:
@@ -169,6 +191,13 @@ def execute_tool(
                 severity=arguments.get("severity", "medium"),
             )
 
+        elif tool_name == "verify_finding":
+            return verify_finding(
+                state=state,
+                finding_index=int(arguments.get("finding_index", 0)),
+                verifier=verifier,
+            )
+
         elif tool_name == "submit_review":
             return submit_review(state=state, summary=arguments.get("summary", ""))
 
@@ -188,4 +217,5 @@ __all__ = [
     "read_file",
     "search_code",
     "submit_review",
+    "verify_finding",
 ]
