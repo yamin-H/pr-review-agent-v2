@@ -1,0 +1,136 @@
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from review.chunker import chunk_diff
+from review.diff import added_lines
+from review.findings import Finding, ReviewOutput
+from review.llm import GroqReviewer
+from review.validate import validate_finding_lines
+
+
+def review_diff(
+    diff_text: str,
+    reviewer: GroqReviewer | None = None,
+    pr_title: str | None = None,
+    pr_description: str | None = None,
+) -> ReviewOutput:
+    """Run an end-to-end review on a unified diff text string."""
+    if reviewer is None:
+        reviewer = GroqReviewer()
+
+    chunks = chunk_diff(diff_text)
+    if not chunks:
+        return ReviewOutput(
+            summary="No reviewable changes found in the provided diff.",
+            findings=[],
+        )
+
+    # Ground truth valid added lines from the diff
+    parsed_lines = added_lines(diff_text)
+    valid_lines = {(item.path, item.line) for item in parsed_lines}
+
+    all_valid_findings: list[Finding] = []
+    chunk_summaries: list[str] = []
+
+    for chunk in chunks:
+        chunk_prompt_text = chunk.format_for_prompt()
+        chunk_review = reviewer.review_chunk(
+            diff_chunk_text=chunk_prompt_text,
+            pr_title=pr_title,
+            pr_description=pr_description,
+        )
+
+        valid_findings, _ = validate_finding_lines(chunk_review.findings, valid_lines)
+        all_valid_findings.extend(valid_findings)
+
+        if chunk_review.summary:
+            chunk_summaries.append(chunk_review.summary)
+
+    consolidated_summary = (
+        " ".join(chunk_summaries)
+        if chunk_summaries
+        else "Review complete with no critical findings."
+    )
+
+    return ReviewOutput(
+        summary=consolidated_summary,
+        findings=all_valid_findings,
+    )
+
+
+def print_human_report(review: ReviewOutput) -> None:
+    """Print review results in a clean, professional human-readable terminal format."""
+    print("=" * 80)
+    print("AUTOMONOMOUS PR REVIEW REPORT")
+    print("=" * 80)
+    print(f"\nSummary:\n{review.summary}\n")
+
+    if not review.findings:
+        print("No inline findings reported. Changes look good.")
+    else:
+        print(f"Findings ({len(review.findings)}):")
+        for i, finding in enumerate(review.findings, 1):
+            severity_tag = f"[{finding.severity.value.upper()}]"
+            print(f"\n  {i}. {severity_tag} {finding.file}:{finding.line} - {finding.title}")
+            print(f"     {finding.body}")
+
+    print("\n" + "=" * 80)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point for running reviews on diff files or piped stdin."""
+    parser = argparse.ArgumentParser(description="Autonomous PR Review Agent (v2) - Phase 1 CLI")
+    parser.add_argument(
+        "diff_file",
+        nargs="?",
+        help="Path to a unified diff/patch file (or reads from stdin if omitted)",
+    )
+    parser.add_argument("--model", help="Groq model name override")
+    parser.add_argument("--title", help="Optional PR title")
+    parser.add_argument("--description", help="Optional PR description")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output raw JSON instead of formatted report",
+    )
+
+    args = parser.parse_args(argv)
+
+    if args.diff_file:
+        diff_path = Path(args.diff_file)
+        if not diff_path.exists():
+            print(f"Error: Diff file not found: {args.diff_file}", file=sys.stderr)
+            return 1
+        diff_text = diff_path.read_text(encoding="utf-8")
+    else:
+        if sys.stdin.isatty():
+            parser.print_help()
+            print("\nError: No diff file provided and stdin is empty.", file=sys.stderr)
+            return 1
+        diff_text = sys.stdin.read()
+
+    reviewer = GroqReviewer(model=args.model)
+
+    try:
+        result = review_diff(
+            diff_text=diff_text,
+            reviewer=reviewer,
+            pr_title=args.title,
+            pr_description=args.description,
+        )
+    except Exception as e:
+        print(f"Error executing review: {e}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(result.model_dump(), indent=2))
+    else:
+        print_human_report(result)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
