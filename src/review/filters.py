@@ -33,6 +33,4 @@ def should_review(path: str) -> bool:
         return False
     if name.endswith(SKIP_SUFFIXES):
         return False
-    if any(part in name for part in SKIP_NAME_PARTS):
-        return False
-    return True
+    return not any(part in name for part in SKIP_NAME_PARTS)
