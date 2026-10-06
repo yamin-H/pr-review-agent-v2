@@ -18,7 +18,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 
 [tool.ruff]
@@ -39,7 +39,7 @@ select = [
 ignore = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["review"]
+known-first-party = ["review", "evals"]
 
 [tool.mypy]
 python_version = "3.11"

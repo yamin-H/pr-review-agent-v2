@@ -65,4 +65,3 @@ def test_groq_reviewer_missing_api_key_raises(monkeypatch: pytest.MonkeyPatch) -
     reviewer.client = None
     with pytest.raises(LLMReviewError, match="GROQ_API_KEY is not set"):
         reviewer.review_chunk("diff")
-
