@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from evals.metrics import EvalCase, GroundTruthFinding
 from evals.run import load_dataset, main, run_benchmark
 from review.findings import Finding, ReviewOutput, Severity
@@ -93,4 +95,41 @@ def test_eval_runner_main(tmp_path: Path) -> None:
     )
     assert exit_code == 0
     saved_files = list(output_dir.glob("baseline_*.json"))
+    assert len(saved_files) == 1
+
+
+def test_eval_runner_main_with_agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset_dir = tmp_path / "dataset"
+    output_dir = tmp_path / "results"
+    dataset_dir.mkdir()
+
+    case = EvalCase(
+        id="clean-test",
+        diff=(
+            "diff --git a/clean.py b/clean.py\n"
+            "--- a/clean.py\n"
+            "+++ b/clean.py\n"
+            "@@ -1,1 +1,2 @@\n"
+            " a\n"
+            "+b\n"
+        ),
+        is_clean=True,
+    )
+    (dataset_dir / "case.json").write_text(json.dumps(case.model_dump()), encoding="utf-8")
+
+    mock_runner = MagicMock()
+    mock_runner.review_to_output.return_value = ReviewOutput(summary="Done", findings=[])
+    monkeypatch.setattr("evals.run.AgentRunner", lambda **kwargs: mock_runner)
+
+    exit_code = main(
+        [
+            "--dataset-dir",
+            str(dataset_dir),
+            "--output-dir",
+            str(output_dir),
+            "--agent",
+        ]
+    )
+    assert exit_code == 0
+    saved_files = list(output_dir.glob("agent_*.json"))
     assert len(saved_files) == 1

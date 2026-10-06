@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from evals.metrics import CaseResult, EvalCase, evaluate_case, summarize_eval_results
+from review.agent.graph import AgentRunner
 from review.cli import review_diff
 from review.llm import GroqReviewer
 
@@ -42,6 +43,8 @@ def run_benchmark(
     cases: list[EvalCase],
     reviewer: GroqReviewer | None = None,
     line_tolerance: int = 1,
+    use_agent: bool = False,
+    repo_root: Path | None = None,
 ) -> list[CaseResult]:
     """Execute the review pipeline across evaluation cases and measure results."""
     if reviewer is None:
@@ -50,10 +53,12 @@ def run_benchmark(
     results: list[CaseResult] = []
 
     for i, case in enumerate(cases, 1):
+        mode_label = "Agent" if use_agent else "Baseline"
         logger.info(
-            "[%d/%d] Evaluating %s (%s, clean=%s)",
+            "[%d/%d] [%s] Evaluating %s (%s, clean=%s)",
             i,
             len(cases),
+            mode_label,
             case.id,
             case.title or "Untitled",
             case.is_clean,
@@ -61,7 +66,15 @@ def run_benchmark(
 
         start = time.perf_counter()
         try:
-            review_output = review_diff(case.diff, reviewer=reviewer)
+            if use_agent:
+                runner = AgentRunner(reviewer=reviewer)
+                review_output = runner.review_to_output(
+                    diff_text=case.diff,
+                    repo_root=repo_root or Path.cwd(),
+                    pr_title=case.title,
+                )
+            else:
+                review_output = review_diff(case.diff, reviewer=reviewer)
         except Exception as e:
             logger.error("Review execution error on case %s: %s", case.id, e)
             continue
@@ -136,6 +149,11 @@ def main(argv: list[str] | None = None) -> int:
         default=1,
         help="Allowed line tolerance for matching findings to ground truth",
     )
+    parser.add_argument(
+        "--agent",
+        action="store_true",
+        help="Run the autonomous agent loop with tools instead of single-shot review",
+    )
     parser.add_argument("--limit", type=int, help="Limit number of cases to evaluate")
 
     args = parser.parse_args(argv)
@@ -149,17 +167,27 @@ def main(argv: list[str] | None = None) -> int:
         cases = cases[: args.limit]
 
     reviewer = GroqReviewer(model=args.model)
-    case_results = run_benchmark(cases, reviewer=reviewer, line_tolerance=args.tolerance)
+    case_results = run_benchmark(
+        cases,
+        reviewer=reviewer,
+        line_tolerance=args.tolerance,
+        use_agent=args.agent,
+    )
 
     summary = summarize_eval_results(case_results)
     summary_dict = summary.model_dump()
 
-    print_benchmark_table(summary_dict, model_name=reviewer.model or "unknown")
+    mode_label = "Autonomous Agent Loop" if args.agent else "Single-Shot Baseline"
+    print_benchmark_table(
+        summary_dict,
+        model_name=f"{reviewer.model or 'unknown'} ({mode_label})",
+    )
 
     # Persist benchmark result to file
     args.output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    out_file = args.output_dir / f"baseline_{timestamp}.json"
+    prefix = "agent" if args.agent else "baseline"
+    out_file = args.output_dir / f"{prefix}_{timestamp}.json"
 
     result_payload = {
         "timestamp": datetime.now(UTC).isoformat(),
