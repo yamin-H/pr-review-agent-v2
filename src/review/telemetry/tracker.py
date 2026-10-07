@@ -9,6 +9,7 @@ from typing import Any
 
 from review.telemetry.cost import calculate_cost_usd
 from review.telemetry.models import ReviewTrace, Span, SpanType
+from review.telemetry.otel import SpanKind, StatusCode, get_current_span, get_tracer
 
 logger = logging.getLogger("review.telemetry.tracker")
 
@@ -23,8 +24,16 @@ class TelemetryTracker:
         delivery_id: str | None = None,
         trace_id: str | None = None,
     ) -> None:
+        assigned_trace_id = trace_id
+        if not assigned_trace_id:
+            current_span = get_current_span()
+            if current_span:
+                assigned_trace_id = current_span.context.trace_id
+            else:
+                assigned_trace_id = f"trace_{uuid.uuid4().hex[:12]}"
+
         self.trace = ReviewTrace(
-            trace_id=trace_id or f"trace_{uuid.uuid4().hex[:12]}",
+            trace_id=assigned_trace_id,
             repo=repo,
             pull_number=pull_number,
             delivery_id=delivery_id,
@@ -45,15 +54,31 @@ class TelemetryTracker:
             start_time=time.time(),
             attributes=attributes or {},
         )
-        try:
-            yield s
-        except Exception as exc:
-            s.finish(error=str(exc))
-            self.trace.spans.append(s)
-            raise
-        else:
-            s.finish()
-            self.trace.spans.append(s)
+        tracer = get_tracer("review.tracker")
+        otel_attrs: dict[str, Any] = {
+            "span_type": span_type.value,
+            "repo": self.trace.repo,
+            "trace_id": self.trace.trace_id,
+        }
+        if attributes:
+            otel_attrs.update(attributes)
+
+        with tracer.start_as_current_span(
+            name=name,
+            kind=SpanKind.INTERNAL,
+            attributes=otel_attrs,
+        ) as otel_span:
+            try:
+                yield s
+            except Exception as exc:
+                s.finish(error=str(exc))
+                self.trace.spans.append(s)
+                otel_span.record_exception(exc)
+                raise
+            else:
+                s.finish()
+                self.trace.spans.append(s)
+                otel_span.set_status(StatusCode.OK)
 
     def record_tokens(
         self,

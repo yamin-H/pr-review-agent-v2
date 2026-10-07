@@ -11,7 +11,8 @@ from review.api.routes.repos import router as repos_router
 from review.api.routes.reviews import router as reviews_router
 from review.api.routes.webhooks import router as webhooks_router
 from review.service.config import ServiceConfig
-from review.telemetry.dashboard import render_dashboard_html
+from review.telemetry.console import render_dashboard_html
+from review.telemetry.otel import OpenTelemetryMiddleware
 from review.telemetry.registry import get_global_registry
 
 logger = logging.getLogger("review.api.main")
@@ -27,6 +28,9 @@ def create_app(config: ServiceConfig | None = None) -> FastAPI:
             "and telemetry service."
         ),
     )
+
+    # Distributed Tracing ASGI Middleware
+    app.add_middleware(OpenTelemetryMiddleware)
 
     # 1. Mount Modular Subsystem Routers
     app.include_router(webhooks_router)

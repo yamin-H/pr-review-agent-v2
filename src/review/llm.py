@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from review.findings import ReviewOutput
 from review.prompts import REVIEWER_SYSTEM_PROMPT, format_review_prompt
+from review.telemetry.otel import SpanKind, get_tracer
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -69,59 +70,74 @@ class GroqReviewer:
         ]
 
         last_error: Exception | None = None
+        tracer = get_tracer("review.llm")
+        with tracer.start_as_current_span(
+            "llm.groq.review_chunk",
+            kind=SpanKind.CLIENT,
+            attributes={"model": self.model, "pr_title": pr_title or ""},
+        ) as otel_span:
+            for attempt in range(1, max_retries + 1):
+                try:
+                    response = client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        response_format={"type": "json_object"},
+                        temperature=0.1,
+                    )
 
-        for attempt in range(1, max_retries + 1):
-            try:
-                response = client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    response_format={"type": "json_object"},
-                    temperature=0.1,
-                )
+                    content = response.choices[0].message.content or "{}"
+                    data = json.loads(content)
+                    output = ReviewOutput.model_validate(data)
+                    otel_span.set_attribute("findings_count", len(output.findings))
+                    if getattr(response, "usage", None):
+                        usage = response.usage
+                        otel_span.set_attribute(
+                            "prompt_tokens", getattr(usage, "prompt_tokens", 0)
+                        )
+                        otel_span.set_attribute(
+                            "completion_tokens", getattr(usage, "completion_tokens", 0)
+                        )
+                    return output
 
-                content = response.choices[0].message.content or "{}"
-                data = json.loads(content)
-                return ReviewOutput.model_validate(data)
+                except RateLimitError as e:
+                    last_error = e
+                    wait_time = backoff_seconds * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Groq rate limit encountered on attempt %d/%d. Waiting %.1fs: %s",
+                        attempt,
+                        max_retries,
+                        wait_time,
+                        e,
+                    )
+                    time.sleep(wait_time)
 
-            except RateLimitError as e:
-                last_error = e
-                wait_time = backoff_seconds * (2 ** (attempt - 1))
-                logger.warning(
-                    "Groq rate limit encountered on attempt %d/%d. Waiting %.1fs: %s",
-                    attempt,
-                    max_retries,
-                    wait_time,
-                    e,
-                )
-                time.sleep(wait_time)
+                except (json.JSONDecodeError, ValidationError) as e:
+                    last_error = e
+                    logger.warning(
+                        "Invalid structured output on attempt %d/%d: %s",
+                        attempt,
+                        max_retries,
+                        e,
+                    )
+                    # Feed the validation failure back to the model for correction
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Your previous response had schema validation errors: {e}. "
+                                "Please fix them and return valid JSON adhering strictly to: "
+                                '{"summary": "...", "findings": [{"file": "...", "line": 1, '
+                                '"title": "...", "body": "...", "severity": "medium"}]}'
+                            ),
+                        }
+                    )
+                    time.sleep(backoff_seconds)
 
-            except (json.JSONDecodeError, ValidationError) as e:
-                last_error = e
-                logger.warning(
-                    "Invalid structured output on attempt %d/%d: %s",
-                    attempt,
-                    max_retries,
-                    e,
-                )
-                # Feed the validation failure back to the model for correction
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Your previous response had schema validation errors: {e}. "
-                            "Please fix them and return valid JSON adhering strictly to: "
-                            '{"summary": "...", "findings": [{"file": "...", "line": 1, '
-                            '"title": "...", "body": "...", "severity": "medium"}]}'
-                        ),
-                    }
-                )
-                time.sleep(backoff_seconds)
+                except Exception as e:
+                    last_error = e
+                    logger.error("Unexpected error during LLM call on attempt %d: %s", attempt, e)
+                    time.sleep(backoff_seconds)
 
-            except Exception as e:
-                last_error = e
-                logger.error("Unexpected error during LLM call on attempt %d: %s", attempt, e)
-                time.sleep(backoff_seconds)
-
-        raise LLMReviewError(
-            f"Failed to generate valid review after {max_retries} attempts: {last_error}"
-        ) from last_error
+            raise LLMReviewError(
+                f"Failed to generate valid review after {max_retries} attempts: {last_error}"
+            ) from last_error

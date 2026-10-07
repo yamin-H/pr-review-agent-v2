@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, ValidationError
 from review.findings import Finding, Severity
 from review.llm import GroqReviewer
 from review.security import wrap_untrusted
+from review.telemetry.otel import SpanKind, get_tracer
 from review.validate import validate_findings_against_diff
 
 logger = logging.getLogger("review.verifier")
@@ -160,6 +161,36 @@ class FindingVerifier:
         backoff_seconds: float = 1.0,
     ) -> tuple[list[Finding], list[VerificationResult]]:
         """Adversarially evaluate a list of findings, returning (surviving_findings, verdicts)."""
+        tracer = get_tracer("review.verifier")
+        with tracer.start_as_current_span(
+            "verifier.adversarial_challenge",
+            kind=SpanKind.INTERNAL,
+            attributes={"candidate_findings_count": len(findings), "model": self.model},
+        ) as otel_span:
+            surviving, verdicts = self._verify_findings_internal(
+                findings=findings,
+                diff_text=diff_text,
+                pr_title=pr_title,
+                pr_description=pr_description,
+                max_retries=max_retries,
+                backoff_seconds=backoff_seconds,
+            )
+            otel_span.set_attribute("surviving_findings_count", len(surviving))
+            otel_span.set_attribute(
+                "dropped_findings_count", len(findings) - len(surviving)
+            )
+            return surviving, verdicts
+
+    def _verify_findings_internal(
+        self,
+        findings: list[Finding],
+        diff_text: str,
+        pr_title: str = "",
+        pr_description: str = "",
+        max_retries: int = 3,
+        backoff_seconds: float = 1.0,
+    ) -> tuple[list[Finding], list[VerificationResult]]:
+        """Internal adversarial evaluation implementation."""
         if not findings:
             return [], []
 
