@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -14,18 +15,32 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
     mapped_column,
     relationship,
 )
+from sqlalchemy.types import TypeDecorator, TypeEngine
 
 
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy database models."""
 
     pass
+
+
+class VectorType(TypeDecorator[list[float]]):
+    """Platform-independent Vector type rendering Vector(384) on PostgreSQL and JSON elsewhere."""
+
+    impl = Vector(384)
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect: Dialect) -> TypeEngine[Any]:
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(Vector(384))
+        return dialect.type_descriptor(JSON())
 
 
 class Tenant(Base):
@@ -74,6 +89,12 @@ class Repository(Base):
     precedents: Mapped[list["RepoPrecedent"]] = relationship(
         "RepoPrecedent", back_populates="repository", cascade="all, delete-orphan"
     )
+    feedback_records: Mapped[list["ReviewFeedbackRecord"]] = relationship(
+        "ReviewFeedbackRecord", back_populates="repository", cascade="all, delete-orphan"
+    )
+    calibration_metrics: Mapped[list["CalibrationMetricRecord"]] = relationship(
+        "CalibrationMetricRecord", back_populates="repository", cascade="all, delete-orphan"
+    )
 
 
 class ReviewRun(Base):
@@ -110,6 +131,9 @@ class ReviewRun(Base):
     trace: Mapped["ExecutionTrace | None"] = relationship(
         "ExecutionTrace", back_populates="review_run", uselist=False, cascade="all, delete-orphan"
     )
+    feedback_records: Mapped[list["ReviewFeedbackRecord"]] = relationship(
+        "ReviewFeedbackRecord", back_populates="review_run"
+    )
 
 
 class FindingRecord(Base):
@@ -133,11 +157,16 @@ class FindingRecord(Base):
     reproduction_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     reproduction_output: Mapped[str | None] = mapped_column(Text, nullable=True)
     precedent_citation: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rule_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    rule_category: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
 
     review_run: Mapped["ReviewRun"] = relationship("ReviewRun", back_populates="findings")
+    feedback_records: Mapped[list["ReviewFeedbackRecord"]] = relationship(
+        "ReviewFeedbackRecord", back_populates="finding"
+    )
 
 
 class ExecutionTrace(Base):
@@ -185,8 +214,75 @@ class RepoPrecedent(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     file_pattern: Mapped[str] = mapped_column(String(255), default="*", nullable=False)
     code_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(VectorType(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
 
     repository: Mapped["Repository"] = relationship("Repository", back_populates="precedents")
+
+
+class ReviewFeedbackRecord(Base):
+    """Developer feedback signal (reaction, resolution, dismissal) on review comments."""
+
+    __tablename__ = "review_feedback"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    repository_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("repositories.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    review_run_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("review_runs.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    finding_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("findings.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    pull_number: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    comment_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    reaction: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    action: Mapped[str] = mapped_column(String(50), default="reacted", nullable=False)
+    user_login: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    rule_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    rule_category: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+    repository: Mapped["Repository"] = relationship(
+        "Repository", back_populates="feedback_records"
+    )
+    review_run: Mapped["ReviewRun | None"] = relationship(
+        "ReviewRun", back_populates="feedback_records"
+    )
+    finding: Mapped["FindingRecord | None"] = relationship(
+        "FindingRecord", back_populates="feedback_records"
+    )
+
+
+class CalibrationMetricRecord(Base):
+    """Aggregate signal tracking and silence thresholds per repository, category, or rule."""
+
+    __tablename__ = "calibration_metrics"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    repository_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("repositories.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    target_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    target_key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    acceptance_rate: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    total_signals: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    positive_signals: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    negative_signals: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    silenced: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+    repository: Mapped["Repository"] = relationship(
+        "Repository", back_populates="calibration_metrics"
+    )
