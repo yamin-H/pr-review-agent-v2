@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autonomous Review Agent | Operational Telemetry</title>
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --surface-bg: #161b22;
+            --surface-header: #21262d;
+            --border-color: #30363d;
+            --text-main: #c9d1d9;
+            --text-heading: #f0f6fc;
+            --text-muted: #8b949e;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-purple: #a371f7;
+            --accent-orange: #d29922;
+            --accent-red: #f85149;
+            --accent-cyan: #39c5cf;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+            line-height: 1.5;
+            padding: 20px 28px;
+        }
+        /* Top Navigation Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 16px;
+            margin-bottom: 20px;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .brand h1 {
+            color: var(--text-heading);
+            font-size: 20px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .live-tag {
+            font-size: 11px;
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent-green);
+            border: 1px solid rgba(63, 185, 80, 0.4);
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-weight: 600;
+        }
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .nav-btn {
+            background: var(--surface-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.15s ease;
+        }
+        .nav-btn:hover {
+            background: var(--surface-header);
+            color: var(--text-heading);
+            border-color: #8b949e;
+        }
+        .nav-btn.primary {
+            background: #238636;
+            color: #ffffff;
+            border-color: rgba(240, 246, 252, 0.1);
+        }
+        .nav-btn.primary:hover {
+            background: #2ea043;
+        }
+
+        /* Tab Navigation Bar */
+        .tab-bar {
+            display: flex;
+            gap: 4px;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 24px;
+        }
+        .tab-btn {
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--text-muted);
+            padding: 10px 18px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.15s;
+        }
+        .tab-btn:hover {
+            color: var(--text-heading);
+        }
+        .tab-btn.active {
+            color: var(--text-heading);
+            border-bottom-color: var(--accent-orange);
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Metric KPI Cards Grid */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .card {
+            background: var(--surface-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 18px;
+            position: relative;
+        }
+        .card .title {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        .card .value {
+            font-size: 26px;
+            font-weight: 700;
+            color: var(--text-heading);
+        }
+        .card .sub {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Tables & Lists */
+        .table-container {
+            background: var(--surface-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 24px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 13px;
+        }
+        th {
+            background: var(--surface-header);
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        tr.trace-row:hover td {
+            background: #1c2128;
+            cursor: pointer;
+        }
+        .badge {
+            background: #30363d;
+            color: var(--text-main);
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .status-pill {
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .muted { color: var(--text-muted); }
+        .action-btn {
+            background: var(--surface-header);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .action-btn:hover {
+            background: #30363d;
+            color: var(--text-heading);
+        }
+
+        /* Search & Form Elements */
+        .control-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            gap: 12px;
+        }
+        .search-input {
+            background: var(--surface-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-heading);
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            flex: 1;
+            max-width: 450px;
+        }
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+        .select-input {
+            background: var(--surface-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-heading);
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        /* Trace Waterfall Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(1, 4, 9, 0.85);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .modal-overlay.open {
+            display: flex;
+        }
+        .modal-card {
+            background: var(--surface-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            width: 95%;
+            max-width: 1050px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 16px 36px rgba(0,0,0,0.5);
+        }
+        .modal-header {
+            background: var(--surface-header);
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-header h3 {
+            color: var(--text-heading);
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .close-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 4px;
+        }
+        .close-btn:hover { color: var(--text-heading); }
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        /* Waterfall Timeline Visualization */
+        .waterfall-container {
+            background: #0d1117;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }
+        .waterfall-bar-row {
+            margin-bottom: 12px;
+            position: relative;
+        }
+        .waterfall-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-bottom: 4px;
+            font-family: monospace;
+        }
+        .waterfall-track {
+            height: 22px;
+            background: #21262d;
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+        }
+        .waterfall-fill {
+            height: 100%;
+            position: absolute;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            padding-left: 8px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #ffffff;
+            white-space: nowrap;
+            transition: width 0.3s;
+        }
+
+        /* Code & Pre Box */
+        pre {
+            background: #0d1117;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+            font-size: 12px;
+            color: #e6edf3;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            margin-top: 8px;
+        }
+        .finding-card {
+            background: #1c2128;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 14px;
+            margin-bottom: 12px;
+        }
+        .finding-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .severity-critical { background: #f8514933; color: #f85149; border: 1px solid #f8514966; }
+        .severity-high { background: #d2992233; color: #d29922; border: 1px solid #d2992266; }
+        .severity-medium { background: #58a6ff33; color: #58a6ff; border: 1px solid #58a6ff66; }
+        .severity-low { background: #8b949e33; color: #8b949e; border: 1px solid #8b949e66; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="brand">
+            <h1>
+                <span>🛡️ Autonomous PR Review Agent Observability</span>
+                <span class="live-tag">● LIVE</span>
+            </h1>
+        </div>
+        <div class="header-actions">
+            <button class="nav-btn" onclick="refreshCurrentTab()">⟳ Live Refresh</button>
+            <a href="/metrics" class="nav-btn" target="_blank">Prometheus /metrics</a>
+            <a href="/api/v1/metrics" class="nav-btn" target="_blank">JSON Metrics</a>
+            <a href="/docs" class="nav-btn primary" target="_blank">Swagger OpenAPI</a>
+        </div>
+    </div>
+
+    <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('tab-overview', this)">📊 System Overview & KPIs</button>
+        <button class="tab-btn" onclick="switchTab('tab-reviews', this)">🔬 Reviews & Trace Waterfall</button>
+        <button class="tab-btn" onclick="switchTab('tab-repos', this)">⚙️ Repositories & Settings</button>
+        <button class="tab-btn" onclick="switchTab('tab-memory', this)">🧠 Memory & Signals Calibration</button>
+    </div>
+
+    <!-- TAB 1: OVERVIEW & REAL-TIME KPIS -->
+    <div id="tab-overview" class="tab-content active">
+        <div class="grid">
+            <div class="card">
+                <div class="title">Total PR Reviews</div>
+                <div class="value">{{TOTAL_REVIEWS}}</div>
+                <div class="sub">Completed runs</div>
+            </div>
+            <div class="card">
+                <div class="title">Precision Filter Rate</div>
+                <div class="value" style="color: var(--accent-green);">{{FP_RATE}}%</div>
+                <div class="sub">False positives refuted</div>
+            </div>
+            <div class="card">
+                <div class="title">Proof by Execution</div>
+                <div class="value" style="color: var(--accent-blue);">{{REPRO_RATE}}%</div>
+                <div class="sub">Confirmed via Sandbox</div>
+            </div>
+            <div class="card">
+                <div class="title">Precedents Cited</div>
+                <div class="value" style="color: var(--accent-purple);">{{PRECEDENT_RATE}}%</div>
+                <div class="sub">Grounded in repo memory</div>
+            </div>
+            <div class="card">
+                <div class="title">Cumulative Inference Cost</div>
+                <div class="value">${{TOTAL_COST}}</div>
+                <div class="sub">{{TOTAL_TOKENS}} total tokens</div>
+            </div>
+            <div class="card">
+                <div class="title">Average Latency</div>
+                <div class="value">{{AVG_LATENCY}}s</div>
+                <div class="sub">p50: {{P50_LATENCY}}s | p95: {{P95_LATENCY}}s | p99: {{P99_LATENCY}}s</div>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px;">
+            <div class="card">
+                <div class="title">Review Status Distribution</div>
+                <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                        <span>Successful Reviews:</span>
+                        <b style="color: var(--accent-green);">{{REV_SUCCESSFUL}}</b>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                        <span>Empty Diffs (No-op):</span>
+                        <b style="color: var(--accent-orange);">{{REV_EMPTY_DIFF}}</b>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                        <span>Budget Halts:</span>
+                        <b style="color: var(--accent-orange);">{{REV_BUDGET_HALT}}</b>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                        <span>Failed Reviews:</span>
+                        <b style="color: var(--accent-red);">{{REV_FAILED}}</b>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="title">Tokens & Cost Breakdown</div>
+                <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                        <span>Prompt Tokens (Input):</span>
+                        <b>{{PROMPT_TOKENS}}</b>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                        <span>Completion Tokens (Output):</span>
+                        <b>{{COMPLETION_TOKENS}}</b>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                        <span>Findings Evaluated:</span>
+                        <b>{{FINDINGS_GENERATED}}</b>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                        <span>Findings Rejected (Refuted):</span>
+                        <b style="color: var(--accent-green);">{{FINDINGS_REJECTED}}</b>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 2: REVIEWS & VISUAL WATERFALL TRACE INSPECTOR -->
+    <div id="tab-reviews" class="tab-content">
+        <div class="control-row">
+            <input type="text" id="review-search" class="search-input" placeholder="Filter by repository, PR # or status..." oninput="filterReviewsTable()">
+            <div>
+                <span class="muted" style="font-size: 12px; margin-right: 8px;">Auto-refresh:</span>
+                <input type="checkbox" id="auto-refresh-toggle" onchange="toggleAutoRefresh(this.checked)">
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table id="reviews-table">
+                <thead>
+                    <tr>
+                        <th>Repository</th>
+                        <th>PR #</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>Cost & Tokens</th>
+                        <th>Findings</th>
+                        <th>Sandbox Proof</th>
+                        <th>Memory Citation</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="reviews-table-body">
+                    {{ROWS_HTML}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TAB 3: REPOSITORIES & SENSITIVITY SETTINGS -->
+    <div id="tab-repos" class="tab-content">
+        <div class="control-row">
+            <input type="text" id="repo-search" class="search-input" placeholder="Search registered repositories..." oninput="filterReposTable()">
+            <button class="nav-btn primary" onclick="loadRepositories()">⟳ Reload Repositories</button>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Repository Full Name</th>
+                        <th>Tenant</th>
+                        <th>Active Status</th>
+                        <th>Verifier Sensitivity</th>
+                        <th>Sandbox Enabled</th>
+                        <th>Created At</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="repos-table-body">
+                    <tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 24px;">Loading repositories...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TAB 4: MEMORY & SIGNALS CALIBRATION -->
+    <div id="tab-memory" class="tab-content">
+        <div style="margin-bottom: 24px;">
+            <div class="control-row">
+                <select id="memory-repo-select" class="select-input" onchange="loadMemoryAndCalibration()">
+                    <option value="">Select a repository...</option>
+                </select>
+                <div style="display: flex; gap: 8px; flex: 1; max-width: 600px;">
+                    <input type="text" id="memory-search-input" class="search-input" style="max-width: none;" placeholder="Search repository precedents (pgvector cosine search)...">
+                    <button class="nav-btn primary" onclick="searchPrecedents()">🔍 Search</button>
+                </div>
+            </div>
+        </div>
+
+        <h3 style="color: var(--text-heading); font-size: 16px; margin-bottom: 12px;">📚 Repository Precedents & Bug Memory</h3>
+        <div class="table-container" style="margin-bottom: 28px;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Citation</th>
+                        <th>Title</th>
+                        <th>File Pattern</th>
+                        <th>Cosine Match</th>
+                        <th>Description / Snippet</th>
+                    </tr>
+                </thead>
+                <tbody id="precedents-table-body">
+                    <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 20px;">Select a repository to explore vector precedents.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3 style="color: var(--text-heading); font-size: 16px; margin-bottom: 12px;">⚖️ Feedback Calibration & Silence Thresholds</h3>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Target Key</th>
+                        <th>Scope</th>
+                        <th>Acceptance Rate</th>
+                        <th>Signals (+ / -)</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="calibration-table-body">
+                    <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">Select a repository to inspect calibration metrics.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TRACE WATERFALL INSPECTOR MODAL -->
+    <div id="trace-modal" class="modal-overlay" onclick="closeModal(event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>
+                    <span>🔍 Trace Inspector:</span>
+                    <span id="modal-trace-id" style="font-family: monospace; color: var(--accent-blue);"></span>
+                </h3>
+                <button class="close-btn" onclick="closeTraceModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-content">
+                <!-- Injected via JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Hydrate initial in-memory review traces
+        let initialTraces = {{INITIAL_TRACES_JSON}};
+        let autoRefreshInterval = null;
+
+        function switchTab(tabId, btn) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            btn.classList.add('active');
+
+            if (tabId === 'tab-repos') {
+                loadRepositories();
+            } else if (tabId === 'tab-memory') {
+                populateRepoSelector();
+            }
+        }
+
+        function refreshCurrentTab() {
+            const activeTab = document.querySelector('.tab-content.active');
+            if (!activeTab) return;
+            if (activeTab.id === 'tab-reviews') {
+                fetchReviews();
+            } else if (activeTab.id === 'tab-repos') {
+                loadRepositories();
+            } else if (activeTab.id === 'tab-memory') {
+                loadMemoryAndCalibration();
+            } else {
+                window.location.reload();
+            }
+        }
+
+        function toggleAutoRefresh(enabled) {
+            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+            if (enabled) {
+                autoRefreshInterval = setInterval(() => {
+                    fetchReviews();
+                }, 8000);
+            }
+        }
+
+        async function fetchReviews() {
+            try {
+                const res = await fetch('/api/v1/reviews?limit=50');
+                if (!res.ok) return;
+                const data = await res.json();
+                renderReviewsTable(data);
+            } catch (e) {
+                console.error("Failed fetching reviews:", e);
+            }
+        }
+
+        function renderReviewsTable(runs) {
+            const tbody = document.getElementById('reviews-table-body');
+            if (!runs || runs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 24px;">No reviews found.</td></tr>';
+                return;
+            }
+            let html = '';
+            for (const r of runs) {
+                const dur_s = (r.duration_ms / 1000).toFixed(2);
+                const cost = (r.cost_usd || 0).toFixed(4);
+                const statusColor = r.status === 'success' ? '#3fb950' : (r.status === 'empty_diff' ? '#d29922' : '#f85149');
+                const prDisplay = r.pull_number ? '#' + r.pull_number : 'Direct';
+                html += `
+                    <tr class="trace-row" onclick="inspectReviewDetail('${r.id}')">
+                        <td style="font-family: monospace; font-weight: 600;">${escapeHtml(r.repository || 'adhoc')}</td>
+                        <td><span class="badge">${prDisplay}</span></td>
+                        <td><span class="status-pill" style="background: ${statusColor}22; color: ${statusColor}; border: 1px solid ${statusColor}44;">${r.status}</span></td>
+                        <td>${dur_s}s</td>
+                        <td>$${cost} <span class="muted">(${(r.total_tokens || 0).toLocaleString()} tok)</span></td>
+                        <td><b>${r.findings_count || 0}</b></td>
+                        <td><span class="badge" style="background: #3b82f622; color: #60a5fa;">🧪 Detail</span></td>
+                        <td><span class="badge" style="background: #8b5cf622; color: #a78bfa;">📚 Detail</span></td>
+                        <td><button class="action-btn" onclick="event.stopPropagation(); inspectReviewDetail('${r.id}')">🔍 Inspect</button></td>
+                    </tr>
+                `;
+            }
+            tbody.innerHTML = html;
+        }
+
+        function filterReviewsTable() {
+            const q = document.getElementById('review-search').value.toLowerCase();
+            const rows = document.querySelectorAll('#reviews-table-body tr');
+            rows.forEach(r => {
+                r.style.display = r.innerText.toLowerCase().includes(q) ? '' : 'none';
+            });
+        }
+
+        // Inspect Trace Waterfall Modal
+        async function inspectReviewDetail(reviewId) {
+            const modal = document.getElementById('trace-modal');
+            const traceIdEl = document.getElementById('modal-trace-id');
+            const content = document.getElementById('modal-content');
+            traceIdEl.innerText = reviewId;
+            content.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px;">Fetching review execution trace...</div>';
+            modal.classList.add('open');
+
+            try {
+                const res = await fetch('/api/v1/reviews/' + reviewId);
+                if (!res.ok) throw new Error("Review run not found");
+                const data = await res.json();
+                renderWaterfallModal(data);
+            } catch (e) {
+                content.innerHTML = `<div style="color: var(--accent-red); padding: 20px;">Failed to load trace: ${e.message}</div>`;
+            }
+        }
+
+        function inspectTrace(traceId) {
+            const trace = initialTraces.find(t => t.trace_id === traceId);
+            if (trace) {
+                const modal = document.getElementById('trace-modal');
+                document.getElementById('modal-trace-id').innerText = trace.trace_id;
+                modal.classList.add('open');
+                renderLocalTraceModal(trace);
+            } else {
+                inspectReviewDetail(traceId);
+            }
+        }
+
+        function renderWaterfallModal(data) {
+            const content = document.getElementById('modal-content');
+            const trace = data.trace;
+            const spans = (trace && trace.spans) ? trace.spans : [];
+            const totalDuration = data.duration_ms || 1000;
+
+            let waterfallHtml = '';
+            if (spans.length === 0) {
+                waterfallHtml = '<div style="color: var(--text-muted); font-size: 13px; padding: 12px;">No sub-spans recorded for this trace.</div>';
+            } else {
+                const minStart = spans.reduce((min, s) => Math.min(min, s.start_time), spans[0].start_time);
+                for (const s of spans) {
+                    const relOffsetMs = Math.max(0, (s.start_time - minStart) * 1000);
+                    const leftPct = Math.min(95, (relOffsetMs / totalDuration) * 100);
+                    const widthPct = Math.max(3, Math.min(100 - leftPct, (s.duration_ms / totalDuration) * 100));
+
+                    let spanColor = '#a371f7';
+                    if (s.span_type === 'verifier') spanColor = '#f0883e';
+                    else if (s.span_type === 'sandbox') spanColor = '#58a6ff';
+                    else if (s.span_type === 'tool_execution') spanColor = '#3fb950';
+                    else if (s.span_type === 'memory') spanColor = '#db61a2';
+
+                    waterfallHtml += `
+                        <div class="waterfall-bar-row">
+                            <div class="waterfall-meta">
+                                <span><b>${escapeHtml(s.name)}</b> <span class="muted">(${s.span_type})</span></span>
+                                <span>${s.duration_ms.toFixed(1)}ms</span>
+                            </div>
+                            <div class="waterfall-track">
+                                <div class="waterfall-fill" style="left: ${leftPct.toFixed(1)}%; width: ${widthPct.toFixed(1)}%; background: ${spanColor};">
+                                    ${s.duration_ms.toFixed(0)}ms
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            let findingsHtml = '';
+            const findings = data.findings || [];
+            if (findings.length === 0) {
+                findingsHtml = '<div style="color: var(--text-muted); font-size: 13px;">No findings reported for this PR review.</div>';
+            } else {
+                for (const f of findings) {
+                    const sevClass = 'severity-' + (f.severity || 'medium').toLowerCase();
+                    const reproBadge = f.is_reproduced
+                        ? '<span class="badge" style="background: rgba(63, 185, 80, 0.2); color: #3fb950; border: 1px solid #3fb950;">🧪 Confirmed Bug (Sandbox Proved)</span>'
+                        : '<span class="badge" style="background: rgba(139, 148, 158, 0.2); color: #8b949e;">Static Finding</span>';
+                    const citationBadge = f.citation ? `<span class="badge" style="background: rgba(163, 113, 247, 0.2); color: #a371f7;">📚 Citation: ${escapeHtml(f.citation)}</span>` : '';
+
+                    findingsHtml += `
+                        <div class="finding-card">
+                            <div class="finding-header">
+                                <span style="font-weight: 600; font-family: monospace;">${escapeHtml(f.file)}:${f.line}</span>
+                                <div style="display: flex; gap: 8px;">
+                                    <span class="badge ${sevClass}">${f.severity.toUpperCase()}</span>
+                                    ${reproBadge}
+                                    ${citationBadge}
+                                </div>
+                            </div>
+                            <div style="font-weight: 600; color: var(--text-heading); margin-bottom: 6px;">${escapeHtml(f.title)}</div>
+                            <div style="font-size: 13px; color: var(--text-main);">${escapeHtml(f.body)}</div>
+                            ${f.reproduction_output ? `<pre>🧪 Reproduction Output:\n${escapeHtml(f.reproduction_output)}</pre>` : ''}
+                        </div>
+                    `;
+                }
+            }
+
+            content.innerHTML = `
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;">
+                    <div class="card" style="padding: 12px;"><div class="title">Repo</div><div style="font-weight: 600;">${escapeHtml(data.repository)}</div></div>
+                    <div class="card" style="padding: 12px;"><div class="title">Status</div><div style="font-weight: 600; text-transform: uppercase;">${data.status}</div></div>
+                    <div class="card" style="padding: 12px;"><div class="title">Duration</div><div style="font-weight: 600;">${(data.duration_ms / 1000).toFixed(2)}s</div></div>
+                    <div class="card" style="padding: 12px;"><div class="title">Cost</div><div style="font-weight: 600;">$${(data.cost_usd || 0).toFixed(4)}</div></div>
+                </div>
+                <h4 style="color: var(--text-heading); margin-bottom: 12px;">Execution Waterfall Timeline</h4>
+                <div class="waterfall-container">${waterfallHtml}</div>
+                <h4 style="color: var(--text-heading); margin-bottom: 12px;">Inline Findings & Evidence (${findings.length})</h4>
+                ${findingsHtml}
+            `;
+        }
+
+        function renderLocalTraceModal(trace) {
+            const content = document.getElementById('modal-content');
+            const spans = trace.spans || [];
+            const totalDuration = trace.total_duration_ms || 1000;
+
+            let waterfallHtml = '';
+            if (spans.length === 0) {
+                waterfallHtml = '<div style="color: var(--text-muted); padding: 12px;">No sub-spans recorded.</div>';
+            } else {
+                const minStart = spans.reduce((min, s) => Math.min(min, s.start_time), spans[0].start_time);
+                for (const s of spans) {
+                    const relOffsetMs = Math.max(0, (s.start_time - minStart) * 1000);
+                    const leftPct = Math.min(95, (relOffsetMs / totalDuration) * 100);
+                    const widthPct = Math.max(3, Math.min(100 - leftPct, (s.duration_ms / totalDuration) * 100));
+
+                    let spanColor = '#a371f7';
+                    if (s.span_type === 'verifier') spanColor = '#f0883e';
+                    else if (s.span_type === 'sandbox') spanColor = '#58a6ff';
+                    else if (s.span_type === 'tool_execution') spanColor = '#3fb950';
+
+                    waterfallHtml += `
+                        <div class="waterfall-bar-row">
+                            <div class="waterfall-meta">
+                                <span><b>${escapeHtml(s.name)}</b> <span class="muted">(${s.span_type})</span></span>
+                                <span>${s.duration_ms.toFixed(1)}ms</span>
+                            </div>
+                            <div class="waterfall-track">
+                                <div class="waterfall-fill" style="left: ${leftPct.toFixed(1)}%; width: ${widthPct.toFixed(1)}%; background: ${spanColor};">
+                                    ${s.duration_ms.toFixed(0)}ms
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            content.innerHTML = `
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;">
+                    <div class="card" style="padding: 12px;"><div class="title">Repo</div><div style="font-weight: 600;">${escapeHtml(trace.repo || 'adhoc')}</div></div>
+                    <div class="card" style="padding: 12px;"><div class="title">Status</div><div style="font-weight: 600; text-transform: uppercase;">${trace.status}</div></div>
+                    <div class="card" style="padding: 12px;"><div class="title">Duration</div><div style="font-weight: 600;">${(trace.total_duration_ms / 1000).toFixed(2)}s</div></div>
+                    <div class="card" style="padding: 12px;"><div class="title">Cost</div><div style="font-weight: 600;">$${(trace.estimated_cost_usd || 0).toFixed(4)}</div></div>
+                </div>
+                <h4 style="color: var(--text-heading); margin-bottom: 12px;">Execution Waterfall Timeline</h4>
+                <div class="waterfall-container">${waterfallHtml}</div>
+            `;
+        }
+
+        function closeTraceModal() {
+            document.getElementById('trace-modal').classList.remove('open');
+        }
+
+        function closeModal(e) {
+            if (e.target.id === 'trace-modal') closeTraceModal();
+        }
+
+        // Repositories Management Tab
+        async function loadRepositories() {
+            const tbody = document.getElementById('repos-table-body');
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 24px;">Loading repositories...</td></tr>';
+            try {
+                const res = await fetch('/api/v1/repos');
+                if (!res.ok) throw new Error("Failed to load repositories");
+                const repos = await res.json();
+                if (repos.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 24px;">No repositories registered. Webhooks register repos automatically.</td></tr>';
+                    return;
+                }
+                let html = '';
+                for (const r of repos) {
+                    const [owner, name] = r.full_name.split('/');
+                    const activePill = r.is_active
+                        ? '<span class="badge" style="background: rgba(63, 185, 80, 0.2); color: #3fb950;">Active</span>'
+                        : '<span class="badge" style="background: rgba(248, 81, 73, 0.2); color: #f85149;">Disabled</span>';
+                    const settings = r.settings || {};
+                    const sensitivity = settings.verifier_sensitivity || 'standard';
+                    const sandboxEnabled = settings.sandbox_enabled !== false ? 'Enabled' : 'Disabled';
+
+                    html += `
+                        <tr>
+                            <td style="font-family: monospace; font-weight: 600;">${escapeHtml(r.full_name)}</td>
+                            <td>${escapeHtml(r.tenant_name || 'Default')}</td>
+                            <td>${activePill}</td>
+                            <td><span class="badge">${sensitivity}</span></td>
+                            <td><span class="badge">${sandboxEnabled}</span></td>
+                            <td class="muted">${r.created_at ? r.created_at.substring(0, 10) : '-'}</td>
+                            <td>
+                                <button class="action-btn" onclick="toggleRepoActive('${owner}', '${name}', ${!r.is_active})">
+                                    ${r.is_active ? 'Disable' : 'Enable'}
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }
+                tbody.innerHTML = html;
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="7" style="color: var(--accent-red); padding: 20px;">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        async function toggleRepoActive(owner, repo, newStatus) {
+            try {
+                const res = await fetch(`/api/v1/repos/${owner}/${repo}/settings`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({is_active: newStatus})
+                });
+                if (res.ok) loadRepositories();
+            } catch (e) {
+                alert("Failed to update repository status: " + e.message);
+            }
+        }
+
+        function filterReposTable() {
+            const q = document.getElementById('repo-search').value.toLowerCase();
+            const rows = document.querySelectorAll('#repos-table-body tr');
+            rows.forEach(r => {
+                r.style.display = r.innerText.toLowerCase().includes(q) ? '' : 'none';
+            });
+        }
+
+        // Memory & Calibration Tab
+        async function populateRepoSelector() {
+            const select = document.getElementById('memory-repo-select');
+            try {
+                const res = await fetch('/api/v1/repos');
+                if (!res.ok) return;
+                const repos = await res.json();
+                let opts = '<option value="">Select a repository...</option>';
+                for (const r of repos) {
+                    opts += `<option value="${r.id}" data-name="${r.full_name}">${r.full_name}</option>`;
+                }
+                select.innerHTML = opts;
+            } catch (e) {
+                console.error("Failed populating repos:", e);
+            }
+        }
+
+        async function loadMemoryAndCalibration() {
+            const select = document.getElementById('memory-repo-select');
+            const repoId = select.value;
+            if (!repoId) return;
+
+            loadPrecedents(repoId);
+            loadCalibration(repoId);
+        }
+
+        async function loadPrecedents(repoId, query = '') {
+            const tbody = document.getElementById('precedents-table-body');
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 20px;">Searching vector memory...</td></tr>';
+            try {
+                const url = `/api/v1/repos/${repoId}/precedents?query=${encodeURIComponent(query)}&limit=15`;
+                const res = await fetch(url);
+                if (!res.ok) throw new Error("Failed loading precedents");
+                const items = await res.json();
+                if (items.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 20px;">No precedents found for this repository.</td></tr>';
+                    return;
+                }
+                let html = '';
+                for (const item of items) {
+                    const p = item.precedent;
+                    const scorePct = (item.score * 100).toFixed(1);
+                    html += `
+                        <tr>
+                            <td><span class="badge" style="background: rgba(163, 113, 247, 0.2); color: #a371f7;">${escapeHtml(p.citation)}</span></td>
+                            <td style="font-weight: 600;">${escapeHtml(p.title)}</td>
+                            <td><span class="badge" style="font-family: monospace;">${escapeHtml(p.file_pattern)}</span></td>
+                            <td><b style="color: var(--accent-green);">${scorePct}%</b></td>
+                            <td style="font-size: 12px; max-width: 350px;">
+                                <div>${escapeHtml(p.description)}</div>
+                                ${p.code_snippet ? `<pre>${escapeHtml(p.code_snippet.substring(0, 150))}</pre>` : ''}
+                            </td>
+                        </tr>
+                    `;
+                }
+                tbody.innerHTML = html;
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="5" style="color: var(--accent-red); padding: 20px;">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        function searchPrecedents() {
+            const select = document.getElementById('memory-repo-select');
+            const q = document.getElementById('memory-search-input').value;
+            if (!select.value) {
+                alert("Please select a repository first.");
+                return;
+            }
+            loadPrecedents(select.value, q);
+        }
+
+        async function loadCalibration(repoId) {
+            const tbody = document.getElementById('calibration-table-body');
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">Loading calibration metrics...</td></tr>';
+            try {
+                const res = await fetch(`/api/v1/repos/${repoId}/calibration`);
+                if (!res.ok) throw new Error("Failed loading calibration");
+                const metrics = await res.json();
+                if (metrics.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">No developer feedback signals recorded for this repository yet.</td></tr>';
+                    return;
+                }
+                let html = '';
+                for (const m of metrics) {
+                    const ratePct = (m.acceptance_rate * 100).toFixed(0);
+                    const rateColor = m.acceptance_rate >= 0.7 ? '#3fb950' : (m.acceptance_rate >= 0.4 ? '#d29922' : '#f85149');
+                    const statusBadge = m.silenced
+                        ? '<span class="badge" style="background: rgba(248, 81, 73, 0.2); color: #f85149;">SILENCED</span>'
+                        : '<span class="badge" style="background: rgba(63, 185, 80, 0.2); color: #3fb950;">ACTIVE</span>';
+                    html += `
+                        <tr>
+                            <td style="font-family: monospace; font-weight: 600;">${escapeHtml(m.target_key)}</td>
+                            <td><span class="badge">${m.target_type}</span></td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <div style="width: 80px; height: 8px; background: #30363d; border-radius: 4px; overflow: hidden;">
+                                        <div style="width: ${ratePct}%; height: 100%; background: ${rateColor};"></div>
+                                    </div>
+                                    <span style="font-weight: 600; color: ${rateColor};">${ratePct}%</span>
+                                </div>
+                            </td>
+                            <td>
+                                <span style="color: var(--accent-green);">+${m.positive_signals}</span> /
+                                <span style="color: var(--accent-red);">-${m.negative_signals}</span>
+                                <span class="muted">(${m.total_signals} total)</span>
+                            </td>
+                            <td>${statusBadge}</td>
+                            <td>
+                                <button class="action-btn" onclick="toggleMetricSilence('${repoId}', '${m.id}')">
+                                    ${m.silenced ? 'Unsilence' : 'Silence Rule'}
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }
+                tbody.innerHTML = html;
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="6" style="color: var(--accent-red); padding: 20px;">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        async function toggleMetricSilence(repoId, metricId) {
+            try {
+                const res = await fetch(`/api/v1/repos/${repoId}/calibration/${metricId}/toggle-silence`, {
+                    method: 'POST'
+                });
+                if (res.ok) {
+                    loadCalibration(repoId);
+                } else {
+                    alert("Failed to toggle silence status.");
+                }
+            } catch (e) {
+                alert("Error toggling silence: " + e.message);
+            }
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+    </script>
+</body>
+</html>

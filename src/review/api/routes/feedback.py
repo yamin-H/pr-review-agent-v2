@@ -1,6 +1,7 @@
 """API routes for developer feedback signals, calibration metrics, and repository memory."""
 
 import logging
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -128,6 +129,45 @@ async def get_repo_calibration(
         }
         for m in metrics
     ]
+
+
+@router.post(
+    "/{repo_id}/calibration/{metric_id}/toggle-silence",
+    status_code=status.HTTP_200_OK,
+)
+async def toggle_rule_silence(
+    repo_id: str,
+    metric_id: str,
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> dict[str, Any]:
+    """Toggle silence override on a calibration rule metric."""
+    tracker = SignalTracker(session=session)
+    try:
+        resolved_repo_id = await tracker._resolve_repo_id(repo_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+
+    stmt = select(CalibrationMetricRecord).where(
+        CalibrationMetricRecord.id == metric_id,
+        CalibrationMetricRecord.repository_id == resolved_repo_id,
+    )
+    res = await session.execute(stmt)
+    metric = res.scalar_one_or_none()
+    if not metric:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Calibration metric '{metric_id}' not found.",
+        )
+
+    metric.silenced = not metric.silenced
+    metric.updated_at = datetime.now(UTC)
+    await session.commit()
+    return {
+        "status": "updated",
+        "metric_id": metric.id,
+        "target_key": metric.target_key,
+        "silenced": metric.silenced,
+    }
 
 
 @router.post("/{repo_id}/precedents", status_code=status.HTTP_201_CREATED)
