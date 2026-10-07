@@ -28,6 +28,12 @@ class Finding(BaseModel):
     citation: str | None = Field(
         default=None, description="Precedent reference, issue, or PR citation"
     )
+    rule_id: str | None = Field(
+        default=None, description="Optional rule identifier"
+    )
+    rule_category: str | None = Field(
+        default=None, description="Optional rule category (e.g. security, performance, style)"
+    )
 
 
 class ReviewOutput(BaseModel):
