@@ -8,10 +8,13 @@ from review.agent.tools.diff_tools import get_diff, list_changed_files
 from review.agent.tools.findings_tools import (
     add_finding,
     run_reproduction_test,
-    search_precedents,
     verify_finding,
 )
-from review.agent.tools.repo_tools import read_file, search_code
+from review.agent.tools.impact_map import analyze_impact
+from review.agent.tools.memory_tools import search_precedents
+from review.agent.tools.repo_tools import get_blame, read_file, search_code
+from review.agent.tools.static_analysis import run_static_analysis
+from review.agent.tools.subagent import delegate_subagent
 from review.agent.tools.submit import submit_review
 from review.memory.store import MemoryStore
 from review.sandbox.prover import ProofEngine
@@ -93,6 +96,114 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_blame",
+            "description": (
+                "Inspect git blame commit history for a range of lines to understand past changes, "
+                "authors, commit messages, and distinguish legacy code from new regressions."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Relative path to the file in repository",
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "1-indexed starting line number",
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "1-indexed ending line number",
+                    },
+                },
+                "required": ["file_path", "start_line", "end_line"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_impact",
+            "description": (
+                "Perform AST blast radius analysis to find all callers, external usages, and "
+                "associated test files for modified functions, classes, or files."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Relative path to modified Python file",
+                    },
+                    "symbol_name": {
+                        "anyOf": [{"type": "string"}, {"type": "null"}],
+                        "description": "Optional specific function or class name to trace",
+                    },
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_static_analysis",
+            "description": (
+                "Execute deterministic AST static analysis to detect security vulnerabilities "
+                "(SQLi, command injection, insecure eval/pickle, hardcoded secrets) and defect "
+                "patterns (mutable defaults, unclosed handles, silent exception suppression)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Relative path to Python file to analyze",
+                    },
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delegate_subagent",
+            "description": (
+                "Spawn a specialized, bounded subagent to perform an in-depth focused "
+                "investigation (e.g., security_audit, impact_investigation, test_coverage)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_type": {
+                        "type": "string",
+                        "enum": [
+                            "security_audit",
+                            "impact_investigation",
+                            "test_coverage",
+                            "general",
+                        ],
+                        "description": "Specialized role and focus area for the subagent",
+                    },
+                    "instruction": {
+                        "type": "string",
+                        "description": "Specific instruction explaining what to investigate",
+                    },
+                    "focus_files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of file paths to prioritize",
+                    },
+                },
+                "required": ["task_type", "instruction"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_precedents",
             "description": (
                 "Search repository memory for historical precedents, past bug fixes, "
@@ -103,11 +214,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Issue description, pattern, or keywords to search",
+                        "description": "Keywords or pattern describing the issue or design",
                     },
                     "file_path": {
-                        "anyOf": [{"type": "string"}, {"type": "null"}],
-                        "description": "Optional file path being inspected to match file pattern",
+                        "type": "string",
+                        "description": "Optional file path to filter relevant precedents",
                     },
                 },
                 "required": ["query"],
@@ -119,33 +230,39 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "add_finding",
             "description": (
-                "Add an inline review finding. The line must be an added line in the diff, "
-                "or it will be rejected."
+                "Propose a concrete defect or security finding. Line number MUST exist "
+                "in the added lines of the diff for that file."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "file": {"type": "string", "description": "Target file path"},
+                    "file": {
+                        "type": "string",
+                        "description": "File path where issue is located",
+                    },
                     "line": {
                         "type": "integer",
-                        "description": "Exact new-file line number from the diff",
+                        "description": "1-indexed new-file line number from the diff",
                     },
-                    "title": {"type": "string", "description": "Short issue title"},
+                    "title": {
+                        "type": "string",
+                        "description": "Concise summary title of the issue",
+                    },
                     "body": {
                         "type": "string",
-                        "description": "Detailed explanation and recommendation",
+                        "description": "Clear explanation of the bug and suggested fix",
                     },
                     "severity": {
                         "type": "string",
-                        "enum": ["high", "medium", "low", "info"],
-                        "description": "Finding severity level",
+                        "enum": ["critical", "high", "medium", "low"],
+                        "description": "Severity level of the finding",
                     },
                     "citation": {
                         "anyOf": [{"type": "string"}, {"type": "null"}],
-                        "description": "Optional historical precedent citation (e.g. 'PR #412')",
+                        "description": "Optional precedent citation (e.g. 'PR #42')",
                     },
                 },
-                "required": ["file", "line", "title", "body"],
+                "required": ["file", "line", "title", "body", "severity"],
             },
         },
     },
@@ -154,15 +271,15 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "verify_finding",
             "description": (
-                "Adversarially challenge and verify a candidate finding by its number or index. "
-                "Disproves false positives or suggests revisions."
+                "Subject a proposed finding to adversarial Devil's Advocate review "
+                "to confirm or refute it. Can be called at any point after add_finding."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "finding_index": {
                         "type": "integer",
-                        "description": "Number of the finding to verify (1-indexed or 0-indexed)",
+                        "description": "1-indexed number of the finding to verify",
                     },
                 },
                 "required": ["finding_index"],
@@ -174,19 +291,19 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "run_reproduction_test",
             "description": (
-                "Execute a reproduction test in an isolated sandbox to prove a suspected bug. "
-                "Optionally supply custom Python test code or let the engine synthesize one."
+                "Execute a reproduction unit test in an isolated sandbox subprocess to prove "
+                "whether a candidate defect is a real reproducible failure."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "finding_index": {
                         "type": "integer",
-                        "description": "Finding number/index to reproduce (1-indexed or 0-indexed)",
+                        "description": "1-indexed number of the finding to reproduce",
                     },
                     "test_code": {
                         "anyOf": [{"type": "string"}, {"type": "null"}],
-                        "description": "Optional Python test script content to run in the sandbox",
+                        "description": "Optional custom python test code to execute",
                     },
                 },
                 "required": ["finding_index"],
@@ -221,6 +338,8 @@ def execute_tool(
     verifier: FindingVerifier | None = None,
     proof_engine: ProofEngine | None = None,
     memory_store: MemoryStore | None = None,
+    reviewer: Any | None = None,
+    llm_client: Any | None = None,
 ) -> str:
     """Safely dispatch and execute a tool call requested by the agent."""
     try:
@@ -241,6 +360,38 @@ def execute_tool(
 
         elif tool_name == "search_code":
             return search_code(repo_root=repo_root, query=arguments.get("query", ""))
+
+        elif tool_name == "get_blame":
+            return get_blame(
+                repo_root=repo_root,
+                file_path=arguments.get("file_path", ""),
+                start_line=int(arguments.get("start_line", 1)),
+                end_line=int(arguments.get("end_line", 1)),
+            )
+
+        elif tool_name == "analyze_impact":
+            return analyze_impact(
+                repo_root=repo_root,
+                file_path=arguments.get("file_path", ""),
+                symbol_name=arguments.get("symbol_name"),
+            )
+
+        elif tool_name == "run_static_analysis":
+            return run_static_analysis(
+                repo_root=repo_root,
+                file_path=arguments.get("file_path", ""),
+            )
+
+        elif tool_name == "delegate_subagent":
+            return delegate_subagent(
+                state=state,
+                task_type=arguments.get("task_type", "general"),
+                instruction=arguments.get("instruction", ""),
+                focus_files=arguments.get("focus_files"),
+                repo_root=repo_root,
+                reviewer=reviewer,
+                llm_client=llm_client,
+            )
 
         elif tool_name == "search_precedents":
             return search_precedents(
@@ -290,11 +441,15 @@ def execute_tool(
 __all__ = [
     "TOOL_DEFINITIONS",
     "add_finding",
+    "analyze_impact",
+    "delegate_subagent",
     "execute_tool",
+    "get_blame",
     "get_diff",
     "list_changed_files",
     "read_file",
     "run_reproduction_test",
+    "run_static_analysis",
     "search_code",
     "search_precedents",
     "submit_review",

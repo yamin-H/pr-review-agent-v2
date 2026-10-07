@@ -26,12 +26,18 @@ You are an autonomous PR review agent investigating pull request changes.
 Your mission is to find real, verifiable bugs, security flaws, and logic defects.
 
 Core Workflow:
-1. Plan: Inspect the changes systematically. Formulate a quick mental plan of risky areas.
-2. Investigate:
-   - Call `list_changed_files` to see what was modified.
-   - Call `get_diff` to inspect numbered unified diffs.
+1. Plan: Inspect the changes systematically. Formulate a prioritized investigation plan.
+2. Investigate Deeply:
+   - Call `list_changed_files` to inspect all reviewable modified files.
+   - Call `get_diff` to view numbered unified diff hunks.
+   - Call `run_static_analysis` to detect security flaws (SQLi, command injection,
+     hardcoded secrets) or antipatterns early.
+   - Call `analyze_impact` when functions/classes change to locate callers across the codebase.
+   - Call `get_blame` to inspect commit history and determine if code is legacy or new.
    - Call `read_file` or `search_code` to check caller functions and definitions.
-   - Call `search_precedents` to check repository memory for historical bugs or team precedents.
+   - Call `search_precedents` to check memory for historical bugs or team precedents.
+   - Call `delegate_subagent` when a PR modifies multiple complex modules requiring a
+     focused deep dive (e.g. security audit or impact investigation).
 3. Propose Findings: Call `add_finding` for each genuine defect. Line numbers MUST be valid
    new-file line numbers in the diff. Attach precedent citations if applicable.
 4. Verify & Reproduce (Optional):
@@ -126,9 +132,11 @@ class AgentRunner:
         pr_title: str = "",
         pr_description: str = "",
         tracker: TelemetryTracker | None = None,
+        existing_state: AgentState | None = None,
+        initial_prompt: str | None = None,
     ) -> AgentState:
         """Execute the autonomous Plan-Act-Observe review cycle until conclusion or budget halt."""
-        state = AgentState(
+        state = existing_state or AgentState(
             diff=diff_text,
             repo=repo,
             pr_title=pr_title,
@@ -136,14 +144,17 @@ class AgentRunner:
         )
         enforcer = BudgetEnforcer(self.budget_config)
 
-        initial_user_prompt = (
-            f"Please review this pull request.\n"
-            f"Repository: {repo or 'Unknown'}\n"
-            f"Title: {pr_title or 'Untitled'}\n"
-            f"Description: {pr_description or 'No description provided.'}\n\n"
-            f"{wrap_untrusted(diff_text, label='initial_diff')}\n\n"
-            "Begin by planning your investigation and calling tools."
-        )
+        if initial_prompt:
+            initial_user_prompt = initial_prompt
+        else:
+            initial_user_prompt = (
+                f"Please review this pull request.\n"
+                f"Repository: {repo or 'Unknown'}\n"
+                f"Title: {pr_title or 'Untitled'}\n"
+                f"Description: {pr_description or 'No description provided.'}\n\n"
+                f"{wrap_untrusted(diff_text, label='initial_diff')}\n\n"
+                "Begin by planning your investigation and calling tools."
+            )
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": AGENT_SYSTEM_PROMPT},
@@ -235,6 +246,8 @@ class AgentRunner:
                             verifier=self.verifier,
                             proof_engine=self.proof_engine,
                             memory_store=self.memory_store,
+                            reviewer=self.reviewer,
+                            llm_client=self.llm_client,
                         )
                 else:
                     output = execute_tool(
@@ -245,6 +258,8 @@ class AgentRunner:
                         verifier=self.verifier,
                         proof_engine=self.proof_engine,
                         memory_store=self.memory_store,
+                        reviewer=self.reviewer,
+                        llm_client=self.llm_client,
                     )
 
                 # 3. Record in State Trace
