@@ -1,8 +1,8 @@
 # Autonomous PR Review Agent: Project Roadmap & Milestone Plan
 
 **Status:** Active  
-**Current Phase:** Phase 8 (Advanced Repository Memory & Signals) — Complete  
-**Next Phase:** Phase 9 (Observability & Web Console)
+**Current Phase:** Phase 9 (Observability, Web Console & Operations Runbook) — Complete  
+**Next Phase:** Production Launch & Evaluation
 
 ---
 
@@ -19,7 +19,7 @@
 | **Phase 6** | **Production Infrastructure & Service Backbone** | PostgreSQL 16 (`pgvector`) & Redis 7 (`docker-compose.yml`), SQLAlchemy 2.0 async models (`models.py`, `session.py`), Alembic migrations, decoupled `arq` Redis queue worker (`worker/jobs.py`), modular FastAPI routes (`api/routes/`), multi-tenant isolation tests, architecture & STRIDE threat model docs | ✅ **DONE** |
 | **Phase 7** | **Advanced Agent Investigation Tools** | AST impact mapping (`impact_map.py`), static analysis (`static_analysis.py`), git blame tool (`get_blame`), memory tools modularization, subagent delegation (`subagent.py`) | ✅ **DONE** |
 | **Phase 8** | **Advanced Repository Memory & Signals** | `pgvector` HNSW semantic search, human reaction ingestion (`signals.py`), calibrated silence heuristic (`calibration.py`) | ✅ **DONE** |
-| **Phase 9** | **Observability & Web Console** | Dedicated Next.js web application (`apps/web/`), Langfuse/OpenTelemetry distributed tracing, operations runbook (`runbook.md`) | ⏳ *Next Phase* |
+| **Phase 9** | **Observability, Web Console & Operations Runbook** | OpenTelemetry distributed tracing (`otel.py`), W3C TraceContext propagation, OTLP HTTP exporter, 4-tab Web Console & Waterfall Inspector (`console.py`), ADR-008, Operations Runbook (`runbook.md`) | ✅ **DONE** |
 
 ---
 
@@ -86,3 +86,35 @@
    - `GET /api/v1/repos/{repo_id}/calibration`: Exposes acceptance rates and silence thresholds.
    - `POST /api/v1/repos/{repo_id}/precedents` & `GET /api/v1/repos/{repo_id}/precedents`: Semantic search and management.
    - Automatic webhook ingestion for GitHub `pull_request_review_comment` and `reaction` events in `routes/webhooks.py`.
+
+
+---
+
+## 5. Phase 9 Deliverables Completed
+
+1. **OpenTelemetry Distributed Tracing (`src/review/telemetry/otel.py`):**
+   - Full implementation of W3C TraceContext standards (`traceparent`, `tracestate`).
+   - Core tracing engine: `SpanContext`, `SpanKind`, `StatusCode`, `SpanStatus`, `SpanEvent`, `OtelSpan`, `Tracer`, and `TracerProvider`.
+   - Pluggable exporters: `InMemorySpanExporter` (for automated testing), `ConsoleSpanExporter` (for CLI & logging), and `OtlpHttpSpanExporter` (for Jaeger, Datadog, SigNoz, Langfuse).
+   - Async & thread-safe context propagation via `contextvars.ContextVar`.
+   - Function tracing decorator `@trace` for synchronous and asynchronous execution.
+   - ASGI Middleware (`OpenTelemetryMiddleware`) automatically extracting incoming W3C traceparents and establishing root `SERVER` spans.
+   - Seamless bridge between internal `TelemetryTracker.span()` and OpenTelemetry spans.
+   - Tracing instrumentation across `GroqReviewer.review_chunk()`, `FindingVerifier.verify_findings()`, and `ProofEngine.attempt_reproduction()`.
+
+2. **Interactive Multi-Tab Web Console & Trace Inspector (`src/review/telemetry/console.py`):**
+   - Zero-external-dependency, self-contained HTML/CSS/JS architecture running completely offline and air-gapped.
+   - **Tab 1 (System Overview & KPIs):** Real-time monitoring cards for review throughput, precision filter rates, sandbox reproduction proofs, memory precedents, cumulative token costs, and latency percentiles ($p50$, $p95$, $p99$).
+   - **Tab 2 (Reviews & Visual Waterfall Trace Inspector):** Filterable review run table with an interactive modal displaying a horizontal waterfall timeline of all execution spans, span durations, and inline findings with sandbox reproduction stdout/stderr traces.
+   - **Tab 3 (Repositories & Settings):** Real-time repository management table with live active toggles, sensitivity selectors, and REST API updates (`PUT /api/v1/repos/{owner}/{repo}/settings`).
+   - **Tab 4 (Memory & Signals Calibration):** Live semantic vector search against `pgvector` memory and feedback calibration inspector with one-click rule silence overrides (`POST /api/v1/repos/{repo_id}/calibration/{metric_id}/toggle-silence`).
+
+3. **Production Operations Runbook (`docs/runbook.md`):**
+   - Deployment topology with multi-container topology and environment variable matrix.
+   - Database administration: Alembic zero-downtime migrations, `pg_dump -Fc` backup and restore preserving HNSW vector indexes, and routine `VACUUM` / `REINDEX`.
+   - Key rotation runbooks for GitHub App private keys (`.pem`), webhook secrets, and database credentials.
+   - Incident response playbooks for false-positive spikes, worker queue backlogs, LLM rate limiting, and sandbox timeouts.
+   - Prometheus alerting rules specification (`ReviewAgentHighErrorRate`, `ReviewAgentQueueLag`, `ReviewAgentHighP99Latency`).
+
+4. **Architectural Decision Record (`docs/adr/008-distributed-tracing-and-observability.md`):**
+   - Comprehensive documentation of architectural choices, trade-offs, and design rationale for OpenTelemetry tracing and self-contained web console.
