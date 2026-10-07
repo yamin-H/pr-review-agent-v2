@@ -106,3 +106,18 @@ def test_execute_tool_dispatcher(tmp_path: Path) -> None:
 
     unknown = execute_tool("fake_tool", {}, state, tmp_path)
     assert "Error: Unknown tool" in unknown
+
+    # Test static analysis dispatcher
+    test_py = tmp_path / "sample.py"
+    test_py.write_text("def ok(): pass\n", encoding="utf-8")
+    sa_out = execute_tool("run_static_analysis", {"file_path": "sample.py"}, state, tmp_path)
+    assert "Static Analysis Report" in sa_out
+
+    # Test impact map dispatcher
+    im_out = execute_tool("analyze_impact", {"file_path": "sample.py"}, state, tmp_path)
+    assert "Impact & Blast Radius Analysis" in im_out
+
+    # Test memory tools search_precedents dispatcher
+    prec_out = execute_tool("search_precedents", {"query": "auth"}, state, tmp_path)
+    assert "precedents found" in prec_out.lower()
+
