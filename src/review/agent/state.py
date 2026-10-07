@@ -42,7 +42,13 @@ class AgentState(BaseModel):
     is_finished: bool = Field(
         default=False, description="Flag indicating if the review is complete"
     )
+    is_subagent: bool = Field(
+        default=False, description="Flag indicating if this runner is a delegated subagent"
+    )
     final_summary: str = Field(default="", description="Consolidated review summary comment")
+    subagent_reports: list[dict[str, Any]] = Field(
+        default_factory=list, description="Audit reports returned by delegated subagents"
+    )
 
     total_tokens_used: int = Field(default=0, description="Cumulative tokens consumed")
     estimated_cost_usd: float = Field(default=0.0, description="Estimated inference cost in USD")
