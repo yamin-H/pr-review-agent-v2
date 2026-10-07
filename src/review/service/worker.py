@@ -105,6 +105,7 @@ class BackgroundReviewWorker:
             lambda: runner.review_to_output(
                 diff_text=diff_text,
                 repo_root=Path.cwd(),
+                repo=f"{task.owner}/{task.repo}",
                 pr_title=task.title,
                 pr_description=task.body,
             ),

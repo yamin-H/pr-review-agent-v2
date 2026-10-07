@@ -1,9 +1,10 @@
-"""Tools for proposing, validating, and reproducing inline review findings."""
+"""Tools for proposing, validating, reproducing, and searching repository precedents."""
 
 from pathlib import Path
 
 from review.agent.state import AgentState
 from review.findings import Finding, Severity
+from review.memory.store import MemoryStore
 from review.sandbox.prover import ProofEngine
 from review.validate import validate_findings_against_diff
 from review.verifier import FindingVerifier, VerificationDecision
@@ -16,6 +17,7 @@ def add_finding(
     title: str,
     body: str,
     severity: str = "medium",
+    citation: str | None = None,
 ) -> str:
     """Validate a candidate finding against the diff and record it if legitimate.
 
@@ -32,6 +34,7 @@ def add_finding(
         title=title,
         body=body,
         severity=sev,
+        citation=citation,
     )
 
     valid_findings, errors = validate_findings_against_diff([candidate], state.diff)
@@ -40,9 +43,10 @@ def add_finding(
         return f"REJECTED: {err_msg} You must cite an exact new-file line number from the diff."
 
     state.findings.append(candidate)
+    citation_note = f" (Cited: {citation})" if citation else ""
     return (
         f"ACCEPTED: Finding #{len(state.findings)} added for '{file}:{line}' "
-        f"[{sev.value.upper()}] - {title}"
+        f"[{sev.value.upper()}] - {title}{citation_note}"
     )
 
 
@@ -89,6 +93,7 @@ def verify_finding(
             title=result.revised_title or finding.title,
             body=result.revised_body or finding.body,
             severity=result.revised_severity or finding.severity,
+            citation=finding.citation,
         )
         state.findings[target_idx] = revised
         return (
@@ -155,3 +160,39 @@ def run_reproduction_test(
             f"in the sandbox (exit code {result.exit_code}).\n"
             f"Output: {result.error_summary or result.stdout or 'No failure observed'}"
         )
+
+
+def search_precedents(
+    state: AgentState,
+    query: str,
+    file_path: str = "",
+    memory_store: MemoryStore | None = None,
+) -> str:
+    """Search repository memory for historical precedents, bug fixes, or team conventions."""
+    store = memory_store or MemoryStore()
+    repo_scope = state.repo or None
+    results = store.search_precedents(
+        query=query,
+        repo=repo_scope,
+        file_path=file_path,
+        limit=3,
+    )
+
+    if not results:
+        scope_msg = f" for '{state.repo}'" if state.repo else ""
+        return f"No relevant historical precedents found in repository memory{scope_msg}."
+
+    lines: list[str] = [
+        f"Found {len(results)} relevant precedent(s) in repository memory:"
+    ]
+    for i, res in enumerate(results, 1):
+        prec = res.precedent
+        lines.append(
+            f"\n{i}. [{prec.citation}] {prec.title} (Relevance: {res.score:.2f})\n"
+            f"   Details: {prec.description}"
+        )
+        if prec.code_snippet:
+            clean_snippet = prec.code_snippet.strip().replace("\n", " ")[:150]
+            lines.append(f"   Snippet: {clean_snippet}...")
+
+    return "\n".join(lines)

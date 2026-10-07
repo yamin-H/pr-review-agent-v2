@@ -10,6 +10,7 @@ from review.agent.state import AgentState
 from review.agent.tools import TOOL_DEFINITIONS, execute_tool
 from review.findings import ReviewOutput
 from review.llm import GroqReviewer
+from review.memory.store import MemoryStore
 from review.sandbox.prover import ProofEngine
 from review.sandbox.synthesizer import ReproductionSynthesizer
 from review.security import wrap_untrusted
@@ -27,8 +28,9 @@ Core Workflow:
    - Call `list_changed_files` to see what was modified.
    - Call `get_diff` to inspect numbered unified diffs.
    - Call `read_file` or `search_code` to check caller functions and definitions.
+   - Call `search_precedents` to check repository memory for historical bugs or team precedents.
 3. Propose Findings: Call `add_finding` for each genuine defect. Line numbers MUST be valid
-   new-file line numbers in the diff.
+   new-file line numbers in the diff. Attach precedent citations if applicable.
 4. Verify & Reproduce (Optional):
    - Call `verify_finding` to stress-test candidate findings before submitting.
    - Call `run_reproduction_test` to test your defect hypothesis in an isolated sandbox.
@@ -50,6 +52,7 @@ class AgentRunner:
         budget_config: BudgetConfig | None = None,
         verifier: FindingVerifier | None = None,
         proof_engine: ProofEngine | None = None,
+        memory_store: MemoryStore | None = None,
         enable_verifier: bool = False,
         enable_reproduction: bool = False,
     ) -> None:
@@ -60,6 +63,7 @@ class AgentRunner:
         self.proof_engine = proof_engine or ProofEngine(
             synthesizer=ReproductionSynthesizer(reviewer=self.reviewer)
         )
+        self.memory_store = memory_store or MemoryStore()
         self.enable_verifier = enable_verifier
         self.enable_reproduction = enable_reproduction
 
@@ -107,12 +111,14 @@ class AgentRunner:
         self,
         diff_text: str,
         repo_root: Path,
+        repo: str = "",
         pr_title: str = "",
         pr_description: str = "",
     ) -> AgentState:
         """Execute the autonomous Plan-Act-Observe review cycle until conclusion or budget halt."""
         state = AgentState(
             diff=diff_text,
+            repo=repo,
             pr_title=pr_title,
             pr_description=pr_description,
         )
@@ -120,6 +126,7 @@ class AgentRunner:
 
         initial_user_prompt = (
             f"Please review this pull request.\n"
+            f"Repository: {repo or 'Unknown'}\n"
             f"Title: {pr_title or 'Untitled'}\n"
             f"Description: {pr_description or 'No description provided.'}\n\n"
             f"{wrap_untrusted(diff_text, label='initial_diff')}\n\n"
@@ -198,6 +205,7 @@ class AgentRunner:
                     repo_root=repo_root,
                     verifier=self.verifier,
                     proof_engine=self.proof_engine,
+                    memory_store=self.memory_store,
                 )
 
                 # 3. Record in State Trace
@@ -237,6 +245,7 @@ class AgentRunner:
         self,
         diff_text: str,
         repo_root: Path,
+        repo: str = "",
         pr_title: str = "",
         pr_description: str = "",
     ) -> ReviewOutput:
@@ -244,6 +253,7 @@ class AgentRunner:
         state = self.run(
             diff_text=diff_text,
             repo_root=repo_root,
+            repo=repo,
             pr_title=pr_title,
             pr_description=pr_description,
         )

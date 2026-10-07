@@ -22,6 +22,7 @@ class AgentState(BaseModel):
     """Comprehensive execution state of the autonomous review agent."""
 
     diff: str = Field(..., description="Original pull request unified diff")
+    repo: str = Field(default="", description="Target repository name (owner/repo)")
     pr_title: str = Field(default="", description="Title of the PR under review")
     pr_description: str = Field(default="", description="Description of the PR")
 

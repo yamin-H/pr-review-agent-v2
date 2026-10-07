@@ -22,6 +22,9 @@ def format_inline_comment_body(finding: Finding) -> str:
 
     parts = [title_line, finding.body]
 
+    if finding.citation:
+        parts.append(f"> 📚 **Repository Precedent Cited:** *{finding.citation}*")
+
     if finding.is_reproduced:
         parts.append(
             "\n<details>\n<summary>🧪 <b>Proof by Execution (Reproduced in Sandbox)</b></summary>\n"

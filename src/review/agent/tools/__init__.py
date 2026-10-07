@@ -8,10 +8,12 @@ from review.agent.tools.diff_tools import get_diff, list_changed_files
 from review.agent.tools.findings_tools import (
     add_finding,
     run_reproduction_test,
+    search_precedents,
     verify_finding,
 )
 from review.agent.tools.repo_tools import read_file, search_code
 from review.agent.tools.submit import submit_review
+from review.memory.store import MemoryStore
 from review.sandbox.prover import ProofEngine
 from review.verifier import FindingVerifier
 
@@ -91,6 +93,30 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "search_precedents",
+            "description": (
+                "Search repository memory for historical precedents, past bug fixes, "
+                "reverted commits, or team conventions relevant to the code under review."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Issue description, pattern, or keywords to search",
+                    },
+                    "file_path": {
+                        "type": "string",
+                        "description": "Optional file path being inspected to match file pattern",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "add_finding",
             "description": (
                 "Add an inline review finding. The line must be an added line in the diff, "
@@ -113,6 +139,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         "type": "string",
                         "enum": ["high", "medium", "low", "info"],
                         "description": "Finding severity level",
+                    },
+                    "citation": {
+                        "type": "string",
+                        "description": "Optional historical precedent citation (e.g. 'PR #412')",
                     },
                 },
                 "required": ["file", "line", "title", "body"],
@@ -190,6 +220,7 @@ def execute_tool(
     repo_root: Path,
     verifier: FindingVerifier | None = None,
     proof_engine: ProofEngine | None = None,
+    memory_store: MemoryStore | None = None,
 ) -> str:
     """Safely dispatch and execute a tool call requested by the agent."""
     try:
@@ -211,6 +242,14 @@ def execute_tool(
         elif tool_name == "search_code":
             return search_code(repo_root=repo_root, query=arguments.get("query", ""))
 
+        elif tool_name == "search_precedents":
+            return search_precedents(
+                state=state,
+                query=arguments.get("query", ""),
+                file_path=arguments.get("file_path", ""),
+                memory_store=memory_store,
+            )
+
         elif tool_name == "add_finding":
             return add_finding(
                 state=state,
@@ -219,6 +258,7 @@ def execute_tool(
                 title=arguments.get("title", ""),
                 body=arguments.get("body", ""),
                 severity=arguments.get("severity", "medium"),
+                citation=arguments.get("citation"),
             )
 
         elif tool_name == "verify_finding":
@@ -256,6 +296,7 @@ __all__ = [
     "read_file",
     "run_reproduction_test",
     "search_code",
+    "search_precedents",
     "submit_review",
     "verify_finding",
 ]

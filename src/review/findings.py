@@ -25,6 +25,9 @@ class Finding(BaseModel):
     is_reproduced: bool | None = Field(
         default=None, description="Whether the defect was confirmed via execution"
     )
+    citation: str | None = Field(
+        default=None, description="Precedent reference, issue, or PR citation"
+    )
 
 
 class ReviewOutput(BaseModel):
