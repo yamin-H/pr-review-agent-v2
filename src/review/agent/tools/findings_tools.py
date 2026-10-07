@@ -3,8 +3,8 @@
 from pathlib import Path
 
 from review.agent.state import AgentState
+from review.agent.tools.memory_tools import search_precedents
 from review.findings import Finding, Severity
-from review.memory.store import MemoryStore
 from review.sandbox.prover import ProofEngine
 from review.validate import validate_findings_against_diff
 from review.verifier import FindingVerifier, VerificationDecision
@@ -162,37 +162,9 @@ def run_reproduction_test(
         )
 
 
-def search_precedents(
-    state: AgentState,
-    query: str,
-    file_path: str = "",
-    memory_store: MemoryStore | None = None,
-) -> str:
-    """Search repository memory for historical precedents, bug fixes, or team conventions."""
-    store = memory_store or MemoryStore()
-    repo_scope = state.repo or None
-    results = store.search_precedents(
-        query=query,
-        repo=repo_scope,
-        file_path=file_path,
-        limit=3,
-    )
-
-    if not results:
-        scope_msg = f" for '{state.repo}'" if state.repo else ""
-        return f"No relevant historical precedents found in repository memory{scope_msg}."
-
-    lines: list[str] = [
-        f"Found {len(results)} relevant precedent(s) in repository memory:"
-    ]
-    for i, res in enumerate(results, 1):
-        prec = res.precedent
-        lines.append(
-            f"\n{i}. [{prec.citation}] {prec.title} (Relevance: {res.score:.2f})\n"
-            f"   Details: {prec.description}"
-        )
-        if prec.code_snippet:
-            clean_snippet = prec.code_snippet.strip().replace("\n", " ")[:150]
-            lines.append(f"   Snippet: {clean_snippet}...")
-
-    return "\n".join(lines)
+__all__ = [
+    "add_finding",
+    "run_reproduction_test",
+    "search_precedents",
+    "verify_finding",
+]

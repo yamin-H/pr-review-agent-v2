@@ -1,5 +1,5 @@
-"""Read-only repository inspection tools with directory sandbox protections."""
-
+import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 from review.filters import should_review
@@ -106,3 +106,126 @@ def search_code(
 
     result_text = f"Search Results for '{query}' ({len(matches)} matches):\n" + "\n".join(matches)
     return wrap_untrusted(result_text, label="search_results")
+
+
+def get_blame(
+    repo_root: Path,
+    file_path: str,
+    start_line: int,
+    end_line: int,
+) -> str:
+    """Retrieve git blame history for a specific line range in a file.
+
+    Args:
+        repo_root: Path to the repository root containing .git directory.
+        file_path: Relative path to the file.
+        start_line: 1-indexed starting line number.
+        end_line: 1-indexed ending line number.
+
+    Returns:
+        Formatted git blame records with commit SHAs, authors, dates, and line contents.
+    """
+    target = safe_resolve_path(repo_root, file_path)
+    if target is None:
+        return f"Error: Access denied or invalid path: '{file_path}'"
+
+    if not target.exists() or not target.is_file():
+        return f"Error: File not found: '{file_path}'"
+
+    if start_line < 1 or end_line < start_line:
+        return f"Error: Invalid line range: {start_line}-{end_line}"
+
+    # Bounded range to avoid excessive memory usage
+    max_range = 100
+    if end_line - start_line + 1 > max_range:
+        end_line = start_line + max_range - 1
+
+    try:
+        cmd = [
+            "git",
+            "blame",
+            "-L",
+            f"{start_line},{end_line}",
+            "--porcelain",
+            file_path,
+        ]
+        proc = subprocess.run(
+            cmd,
+            cwd=str(repo_root.resolve()),
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return f"Error: git blame timed out for '{file_path}'"
+    except Exception as e:
+        return f"Error executing git blame for '{file_path}': {e}"
+
+    if proc.returncode != 0:
+        err = proc.stderr.strip() or proc.stdout.strip()
+        return f"git blame failed for '{file_path}': {err}"
+
+    # Parse porcelain output
+    blame_lines: list[str] = []
+    current_commit: str = ""
+    current_author: str = ""
+    current_date: str = ""
+    current_summary: str = ""
+    commit_data: dict[str, tuple[str, str, str]] = {}  # sha -> (author, date, summary)
+
+    raw_lines = proc.stdout.splitlines()
+    i = 0
+    while i < len(raw_lines):
+        line = raw_lines[i]
+        if not line:
+            i += 1
+            continue
+
+        parts = line.split()
+        if len(parts) >= 4 and len(parts[0]) == 40:
+            current_commit = parts[0][:8]
+            final_lineno = parts[2]
+            # Read metadata lines following the commit header
+            i += 1
+            while i < len(raw_lines) and not raw_lines[i].startswith("\t"):
+                meta_line = raw_lines[i]
+                if meta_line.startswith("author "):
+                    current_author = meta_line[7:].strip()
+                elif meta_line.startswith("author-time "):
+                    try:
+                        ts = int(meta_line[12:].strip())
+                        current_date = datetime.fromtimestamp(ts, tz=UTC).strftime(
+                            "%Y-%m-%d %H:%M"
+                        )
+                    except Exception:
+                        current_date = "unknown"
+                elif meta_line.startswith("summary "):
+                    current_summary = meta_line[8:].strip()
+                i += 1
+
+            if current_commit in commit_data:
+                current_author, current_date, current_summary = commit_data[current_commit]
+            else:
+                commit_data[current_commit] = (current_author, current_date, current_summary)
+
+            code_line = ""
+            if i < len(raw_lines) and raw_lines[i].startswith("\t"):
+                code_line = raw_lines[i][1:]
+                i += 1
+
+            blame_lines.append(
+                f"[L{final_lineno:>4}] {current_commit} ({current_author:<16} {current_date}) "
+                f"| {code_line}"
+            )
+        else:
+            i += 1
+
+    if not blame_lines:
+        return f"No git blame records found for '{file_path}' (lines {start_line}-{end_line})."
+
+    output_str = (
+        f"Git Blame: {file_path} (Lines {start_line}-{end_line})\n"
+        + "\n".join(blame_lines)
+    )
+    return wrap_untrusted(output_str, label="git_blame")
