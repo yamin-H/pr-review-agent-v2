@@ -143,6 +143,11 @@ def print_human_report(
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point for running reviews on diff files or piped stdin."""
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="Autonomous PR Review Agent (v2) - CLI")
     parser.add_argument(
         "diff_file",
