@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import FastAPI, Response, status
 from fastapi.responses import HTMLResponse
 
+from review.api.routes.feedback import router as feedback_router
 from review.api.routes.repos import router as repos_router
 from review.api.routes.reviews import router as reviews_router
 from review.api.routes.webhooks import router as webhooks_router
@@ -30,6 +31,7 @@ def create_app(config: ServiceConfig | None = None) -> FastAPI:
     # 1. Mount Modular Subsystem Routers
     app.include_router(webhooks_router)
     app.include_router(reviews_router)
+    app.include_router(feedback_router)
     app.include_router(repos_router)
 
     # 2. Health & Diagnostic Probes

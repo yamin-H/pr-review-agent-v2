@@ -18,7 +18,10 @@ from fastapi.responses import JSONResponse
 
 from review.api.auth import verify_webhook_hmac
 from review.api.deps import get_delivery_deduplicator, get_redis_queue
+from review.db.session import get_async_session
 from review.github.webhooks import DeliveryDeduplicator, PullRequestWebhookPayload
+from review.memory.models import SignalFeedback
+from review.memory.signals import SignalTracker
 from review.worker.jobs import process_review_job
 
 logger = logging.getLogger("review.api.routes.webhooks")
@@ -118,7 +121,56 @@ async def handle_github_webhook(
             },
         )
 
-    # 4. Other events ignored
+    # 4. Review Comment & Reaction Signals
+    if x_github_event in ("pull_request_review_comment", "reaction"):
+        try:
+            raw_json = json.loads(payload_bytes.decode("utf-8"))
+        except Exception as e:
+            logger.error("Failed to parse JSON body: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid JSON payload.",
+            ) from e
+
+        action = raw_json.get("action", "reacted")
+        repo_data = raw_json.get("repository", {})
+        repo_name = repo_data.get("full_name") or str(repo_data.get("id", ""))
+        pull_number = raw_json.get("pull_request", {}).get("number") or 0
+        comment_data = raw_json.get("comment", {})
+        comment_id = comment_data.get("id")
+        user_login = raw_json.get("sender", {}).get("login")
+        reaction = raw_json.get("reaction", {}).get("content")
+
+        if repo_name:
+            feedback = SignalFeedback(
+                repository_id=repo_name,
+                pull_number=pull_number,
+                comment_id=comment_id,
+                reaction=reaction,
+                action=action,
+                user_login=user_login,
+            )
+            try:
+                async with get_async_session() as session:
+                    tracker = SignalTracker(session=session)
+                    await tracker.record_feedback(feedback)
+                    await session.commit()
+                logger.info(
+                    "Recorded webhook signal: repo=%s, pr=#%d, action=%s, reaction=%s",
+                    repo_name,
+                    pull_number,
+                    action,
+                    reaction,
+                )
+            except Exception as ex:
+                logger.warning("Failed to record webhook signal feedback: %s", ex)
+
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"status": "recorded", "event": x_github_event, "action": action},
+        )
+
+    # 5. Other events ignored
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content={"status": "ignored", "event": x_github_event},

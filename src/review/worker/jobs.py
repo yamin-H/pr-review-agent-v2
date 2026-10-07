@@ -15,6 +15,8 @@ from review.github.app_auth import GitHubAppAuth
 from review.github.client import GitHubClient
 from review.github.comments import ReviewPublisher
 from review.llm import GroqReviewer
+from review.memory.calibration import CalibrationEngine
+from review.memory.signals import SignalTracker
 from review.sandbox.prover import ProofEngine
 from review.sandbox.synthesizer import ReproductionSynthesizer
 from review.service.config import ServiceConfig
@@ -207,7 +209,30 @@ async def process_review_job(
             tracker=tracker,
         )
 
-        # 3. Publish to GitHub
+        # 3. Apply Calibrated Silence & Severity Adjustment
+        try:
+            async with get_async_session() as calib_session:
+                signal_tracker = SignalTracker(session=calib_session)
+                calibrator = CalibrationEngine(signal_tracker=signal_tracker)
+                calibrated = await calibrator.calibrate(
+                    findings=review_output.findings,
+                    repo_identifier=f"{owner}/{repo_name}",
+                )
+                review_output.findings = calibrated.published
+                logger.info(
+                    "Calibrated review output for %s/%s#%d: "
+                    "%d published, %d silenced, %d downgraded",
+                    owner,
+                    repo_name,
+                    pull_number,
+                    len(calibrated.published),
+                    calibrated.silenced_count,
+                    calibrated.downgraded_count,
+                )
+        except Exception as ex:
+            logger.warning("Calibration filter skipped due to error: %s", ex)
+
+        # 4. Publish to GitHub
         publisher = ReviewPublisher(github_client=github_client)
         publisher.publish_review(
             owner=owner,
@@ -222,7 +247,7 @@ async def process_review_job(
         trace = tracker.finish(status="success", findings_count=len(review_output.findings))
         get_global_registry().record_trace(trace)
 
-        # 4. Persist Results & Findings to Database
+        # 5. Persist Results & Findings to Database
         async with get_async_session() as session:
             run_res = await session.execute(select(ReviewRun).where(ReviewRun.id == review_run_id))
             run = run_res.scalar_one()
@@ -246,6 +271,8 @@ async def process_review_job(
                     reproduction_code=finding.reproduction_code,
                     reproduction_output=finding.reproduction_output,
                     precedent_citation=finding.citation,
+                    rule_id=finding.rule_id,
+                    rule_category=finding.rule_category,
                 )
                 session.add(finding_rec)
 
