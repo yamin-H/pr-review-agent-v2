@@ -1,7 +1,7 @@
 # Autonomous PR Review Agent: Project Roadmap & Milestone Plan
 
 **Status:** Active  
-**Current Phase:** Phase 6 (Production Infrastructure & Service Backbone)
+**Current Phase:** Phase 7 (Advanced Agent Investigation Tools)
 
 ---
 
@@ -16,8 +16,8 @@
 | **Phase 4** | **Adversarial Finding Verifier** | Devil's Advocate refutation engine (`verifier.py`), tri-state verdicts (`keep`, `drop`, `revise`), line fallback, on-demand agent tool & CLI `--verify` pass | ✅ **DONE** |
 | **Phase 5** | **Proof by Execution Sandbox** | Test synthesizer (`synthesizer.py`), timeout runner (`runner.py`), proof engine (`prover.py`), evidence attaching, agent tool & CLI `--reproduce` pass | ✅ **DONE** |
 | **Phase 6** | **Production Infrastructure & Service Backbone** | PostgreSQL 16 (`pgvector`) & Redis 7 (`docker-compose.yml`), SQLAlchemy 2.0 async models (`models.py`, `session.py`), Alembic migrations, decoupled `arq` Redis queue worker (`worker/jobs.py`), modular FastAPI routes (`api/routes/`), multi-tenant isolation tests, architecture & STRIDE threat model docs | ✅ **DONE** |
-| **Phase 7** | **Advanced Agent Investigation Tools** | AST impact mapping (`impact_map.py`), static analysis (`static_analysis.py`), git blame tool (`get_blame`), subagent delegation | ⏳ *Next Phase* |
-| **Phase 8** | **Advanced Repository Memory & Signals** | `pgvector` HNSW semantic search, human reaction ingestion (`signals.py`), calibrated silence heuristic (`calibration.py`) | 📋 *Backlog* |
+| **Phase 7** | **Advanced Agent Investigation Tools** | AST impact mapping (`impact_map.py`), static analysis (`static_analysis.py`), git blame tool (`get_blame`), memory tools modularization, subagent delegation (`subagent.py`) | ✅ **DONE** |
+| **Phase 8** | **Advanced Repository Memory & Signals** | `pgvector` HNSW semantic search, human reaction ingestion (`signals.py`), calibrated silence heuristic (`calibration.py`) | ⏳ *Next Phase* |
 | **Phase 9** | **Observability & Web Console** | Dedicated Next.js web application (`apps/web/`), Langfuse/OpenTelemetry distributed tracing, operations runbook (`runbook.md`) | 📋 *Backlog* |
 
 ---
