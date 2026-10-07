@@ -5,11 +5,13 @@ import logging
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, Response, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from review.service.config import ServiceConfig
 from review.service.security import DeliveryDeduplicator, verify_github_signature
 from review.service.worker import BackgroundReviewWorker, ReviewTask
+from review.telemetry.dashboard import render_dashboard_html
+from review.telemetry.registry import get_global_registry
 
 logger = logging.getLogger("review.service.api")
 
@@ -144,6 +146,35 @@ def create_app(
             status_code=status.HTTP_200_OK,
             content={"status": "ignored", "event": x_github_event},
         )
+
+    @app.get("/metrics", status_code=status.HTTP_200_OK)
+    async def prometheus_metrics() -> Response:
+        """Prometheus metrics exposition endpoint."""
+        registry = get_global_registry()
+        return Response(
+            content=registry.get_prometheus_metrics(),
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
+
+    @app.get("/api/v1/metrics", status_code=status.HTTP_200_OK)
+    async def metrics_summary() -> dict[str, Any]:
+        """Detailed operational metrics summary endpoint."""
+        return get_global_registry().get_summary()
+
+    @app.get("/api/v1/traces", status_code=status.HTTP_200_OK)
+    async def recent_traces(limit: int = 20) -> list[dict[str, Any]]:
+        """Recent review traces endpoint."""
+        return get_global_registry().get_recent_traces(limit=limit)
+
+    @app.get("/dashboard", response_class=HTMLResponse)
+    async def operational_dashboard() -> HTMLResponse:
+        """Interactive dark-mode operational dashboard."""
+        registry = get_global_registry()
+        html_content = render_dashboard_html(
+            summary=registry.get_summary(),
+            recent_traces=registry.get_recent_traces(limit=50),
+        )
+        return HTMLResponse(content=html_content)
 
     return app
 

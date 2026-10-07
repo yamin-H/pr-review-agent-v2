@@ -14,6 +14,8 @@ from review.llm import GroqReviewer
 from review.sandbox.prover import ProofEngine
 from review.sandbox.synthesizer import ReproductionSynthesizer
 from review.service.config import ServiceConfig
+from review.telemetry.registry import get_global_registry
+from review.telemetry.tracker import TelemetryTracker
 from review.verifier import FindingVerifier
 
 logger = logging.getLogger("review.service.worker")
@@ -58,75 +60,106 @@ class BackgroundReviewWorker:
             task.delivery_id,
         )
 
-        # 1. Exchange GitHub App JWT for Installation Token
-        token = self.auth.get_installation_token(task.installation_id)
-        github_client = GitHubClient(token=token)
-
-        # 2. Fetch Pull Request Diff
-        diff_text = github_client.get_pull_request_diff(
-            owner=task.owner,
-            repo=task.repo,
+        tracker = TelemetryTracker(
+            repo=f"{task.owner}/{task.repo}",
             pull_number=task.pull_number,
+            delivery_id=task.delivery_id,
         )
 
-        if not diff_text.strip():
+        try:
+            # 1. Exchange GitHub App JWT for Installation Token
+            token = self.auth.get_installation_token(task.installation_id)
+            github_client = GitHubClient(token=token)
+
+            # 2. Fetch Pull Request Diff
+            diff_text = github_client.get_pull_request_diff(
+                owner=task.owner,
+                repo=task.repo,
+                pull_number=task.pull_number,
+            )
+
+            if not diff_text.strip():
+                logger.info(
+                    "Empty diff for %s/%s#%d, skipping review.",
+                    task.owner,
+                    task.repo,
+                    task.pull_number,
+                )
+                trace = tracker.finish(status="empty_diff", findings_count=0)
+                get_global_registry().record_trace(trace)
+                return ReviewOutput(
+                    summary="No changes found in pull request.",
+                    findings=[],
+                )
+
+            # 3. Instantiate Verifier and ProofEngine according to config
+            verifier = (
+                FindingVerifier(reviewer=self.reviewer) if self.config.enable_verifier else None
+            )
+            proof_engine = (
+                ProofEngine(synthesizer=ReproductionSynthesizer(reviewer=self.reviewer))
+                if self.config.enable_reproduction
+                else None
+            )
+
+            # 4. Execute Autonomous Review
+            runner = AgentRunner(
+                reviewer=self.reviewer,
+                verifier=verifier,
+                proof_engine=proof_engine,
+                enable_verifier=self.config.enable_verifier,
+                enable_reproduction=self.config.enable_reproduction,
+            )
+
+            # Run synchronous review in threadpool to avoid blocking the event loop
+            loop = asyncio.get_running_loop()
+            review_output = await loop.run_in_executor(
+                None,
+                lambda: runner.review_to_output(
+                    diff_text=diff_text,
+                    repo_root=Path.cwd(),
+                    repo=f"{task.owner}/{task.repo}",
+                    pr_title=task.title,
+                    pr_description=task.body,
+                    tracker=tracker,
+                ),
+            )
+
+            # 5. Publish Review to GitHub
+            publisher = ReviewPublisher(github_client=github_client)
+            publisher.publish_review(
+                owner=task.owner,
+                repo=task.repo,
+                pull_number=task.pull_number,
+                head_sha=task.head_sha,
+                review_output=review_output,
+                pr_title=task.title,
+            )
+
+            # 6. Record Trace and Metrics
+            trace = tracker.finish(status="success", findings_count=len(review_output.findings))
+            registry = get_global_registry()
+            registry.record_trace(trace)
+            for f in review_output.findings:
+                registry.record_finding_severity(f.severity.value)
+
             logger.info(
-                "Empty diff for %s/%s#%d, skipping review.",
+                "Worker completed review for %s/%s#%d: %d findings published.",
                 task.owner,
                 task.repo,
                 task.pull_number,
+                len(review_output.findings),
             )
-            return ReviewOutput(
-                summary="No changes found in pull request.",
-                findings=[],
+            return review_output
+
+        except Exception as exc:
+            logger.error(
+                "Worker failed during review for %s/%s#%d: %s",
+                task.owner,
+                task.repo,
+                task.pull_number,
+                exc,
             )
-
-        # 3. Instantiate Verifier and ProofEngine according to config
-        verifier = FindingVerifier(reviewer=self.reviewer) if self.config.enable_verifier else None
-        proof_engine = (
-            ProofEngine(synthesizer=ReproductionSynthesizer(reviewer=self.reviewer))
-            if self.config.enable_reproduction
-            else None
-        )
-
-        # 4. Execute Autonomous Review
-        runner = AgentRunner(
-            reviewer=self.reviewer,
-            verifier=verifier,
-            proof_engine=proof_engine,
-            enable_verifier=self.config.enable_verifier,
-            enable_reproduction=self.config.enable_reproduction,
-        )
-
-        # Run synchronous review in threadpool to avoid blocking the event loop
-        loop = asyncio.get_running_loop()
-        review_output = await loop.run_in_executor(
-            None,
-            lambda: runner.review_to_output(
-                diff_text=diff_text,
-                repo_root=Path.cwd(),
-                repo=f"{task.owner}/{task.repo}",
-                pr_title=task.title,
-                pr_description=task.body,
-            ),
-        )
-
-        # 5. Publish Review to GitHub
-        publisher = ReviewPublisher(github_client=github_client)
-        publisher.publish_review(
-            owner=task.owner,
-            repo=task.repo,
-            pull_number=task.pull_number,
-            head_sha=task.head_sha,
-            review_output=review_output,
-            pr_title=task.title,
-        )
-
-        logger.info(
-            "Worker completed review for %s/%s#%d: %d findings published.",
-            task.owner,
-            task.repo,
-            task.pull_number,
-            len(review_output.findings),
-        )
-        return review_output
+            trace = tracker.finish(status="failed", findings_count=0)
+            get_global_registry().record_trace(trace)
+            raise

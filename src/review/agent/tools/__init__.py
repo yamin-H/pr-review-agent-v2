@@ -59,11 +59,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         "description": "Relative path to file in repository",
                     },
                     "start_line": {
-                        "type": "integer",
+                        "anyOf": [{"type": "integer"}, {"type": "null"}],
                         "description": "Optional 1-indexed starting line number",
                     },
                     "end_line": {
-                        "type": "integer",
+                        "anyOf": [{"type": "integer"}, {"type": "null"}],
                         "description": "Optional 1-indexed ending line number",
                     },
                 },
@@ -106,7 +106,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         "description": "Issue description, pattern, or keywords to search",
                     },
                     "file_path": {
-                        "type": "string",
+                        "anyOf": [{"type": "string"}, {"type": "null"}],
                         "description": "Optional file path being inspected to match file pattern",
                     },
                 },
@@ -141,7 +141,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         "description": "Finding severity level",
                     },
                     "citation": {
-                        "type": "string",
+                        "anyOf": [{"type": "string"}, {"type": "null"}],
                         "description": "Optional historical precedent citation (e.g. 'PR #412')",
                     },
                 },
@@ -185,7 +185,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         "description": "Finding number/index to reproduce (1-indexed or 0-indexed)",
                     },
                     "test_code": {
-                        "type": "string",
+                        "anyOf": [{"type": "string"}, {"type": "null"}],
                         "description": "Optional Python test script content to run in the sandbox",
                     },
                 },

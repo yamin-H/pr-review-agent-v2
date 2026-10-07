@@ -1,0 +1,8 @@
+diff --git a/flask/wrappers.py b/flask/wrappers.py
+--- a/flask/wrappers.py
++++ b/flask/wrappers.py
+@@ -80,3 +80,5 @@ class Request(object):
+     def get_json(self, force=False, silent=False):
+         data = self.get_data()
++        # Unchecked json parsing
++        return json.loads(data)

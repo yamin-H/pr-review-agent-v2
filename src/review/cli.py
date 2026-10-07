@@ -9,6 +9,8 @@ from review.findings import Finding, ReviewOutput
 from review.llm import GroqReviewer
 from review.sandbox.prover import ProofEngine
 from review.sandbox.synthesizer import ReproductionSynthesizer
+from review.telemetry.models import ReviewTrace
+from review.telemetry.tracker import TelemetryTracker
 from review.validate import validate_finding_lines
 from review.verifier import FindingVerifier
 
@@ -92,7 +94,10 @@ def review_diff(
     )
 
 
-def print_human_report(review: ReviewOutput) -> None:
+def print_human_report(
+    review: ReviewOutput,
+    trace: ReviewTrace | None = None,
+) -> None:
     """Print review results in a clean, professional human-readable terminal format."""
     print("=" * 80)
     print("AUTONOMOUS PR REVIEW REPORT")
@@ -106,13 +111,32 @@ def print_human_report(review: ReviewOutput) -> None:
         for i, finding in enumerate(review.findings, 1):
             severity_tag = f"[{finding.severity.value.upper()}]"
             repro_tag = " [PROVEN IN SANDBOX]" if finding.is_reproduced else ""
+            citation_tag = f" [Cited: {finding.citation}]" if finding.citation else ""
             print(
-                f"\n  {i}. {severity_tag}{repro_tag} "
+                f"\n  {i}. {severity_tag}{repro_tag}{citation_tag} "
                 f"{finding.file}:{finding.line} - {finding.title}"
             )
             print(f"     {finding.body}")
             if finding.reproduction_output:
                 print(f"     [Sandbox Proof Output]: {finding.reproduction_output[:120]}...")
+
+    if trace:
+        print("\n" + "-" * 80)
+        print("EXECUTION TELEMETRY & COST")
+        print("-" * 80)
+        dur_s = trace.total_duration_ms / 1000.0
+        print(f"  Duration:           {dur_s:.2f}s")
+        print(
+            f"  Tokens Consumed:    {trace.total_tokens:,} "
+            f"(Prompt: {trace.prompt_tokens:,}, Output: {trace.completion_tokens:,})"
+        )
+        print(f"  Estimated Cost:     ${trace.estimated_cost_usd:.6f}")
+        bd = trace.get_latency_breakdown()
+        if any(v > 0 for v in bd.values()):
+            print("  Latency Breakdown:")
+            for k, ms in bd.items():
+                if ms > 0:
+                    print(f"    - {k}: {ms / 1000.0:.2f}s")
 
     print("\n" + "=" * 80)
 
@@ -165,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         diff_text = sys.stdin.read()
 
     reviewer = GroqReviewer(model=args.model)
+    tracker = TelemetryTracker(repo=Path.cwd().name) if args.agent else None
 
     try:
         if args.agent:
@@ -178,8 +203,10 @@ def main(argv: list[str] | None = None) -> int:
             result = runner.review_to_output(
                 diff_text=diff_text,
                 repo_root=Path.cwd(),
+                repo=Path.cwd().name,
                 pr_title=args.title or "",
                 pr_description=args.description or "",
+                tracker=tracker,
             )
         else:
             result = review_diff(
@@ -194,10 +221,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error executing review: {e}", file=sys.stderr)
         return 1
 
+    trace = tracker.finish(
+        status="success", findings_count=len(result.findings)
+    ) if tracker else None
+
     if args.json:
-        print(json.dumps(result.model_dump(), indent=2))
+        payload = result.model_dump()
+        if trace:
+            payload["telemetry"] = trace.model_dump()
+        print(json.dumps(payload, indent=2))
     else:
-        print_human_report(result)
+        print_human_report(result, trace=trace)
 
     return 0
 

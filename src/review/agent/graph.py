@@ -14,6 +14,9 @@ from review.memory.store import MemoryStore
 from review.sandbox.prover import ProofEngine
 from review.sandbox.synthesizer import ReproductionSynthesizer
 from review.security import wrap_untrusted
+from review.telemetry.cost import calculate_cost_usd
+from review.telemetry.models import SpanType
+from review.telemetry.tracker import TelemetryTracker
 from review.verifier import FindingVerifier
 
 logger = logging.getLogger("review.agent.graph")
@@ -70,12 +73,13 @@ class AgentRunner:
     def _call_llm(
         self,
         messages: list[dict[str, Any]],
-    ) -> tuple[str, list[dict[str, Any]], int]:
-        """Invoke LLM and return (thought_content, tool_calls, tokens_used)."""
+        tracker: TelemetryTracker | None = None,
+    ) -> tuple[str, list[dict[str, Any]], int, float]:
+        """Invoke LLM and return (thought_content, tool_calls, tokens_used, cost_usd)."""
         # If a mock/fake LLM is supplied (e.g. FakeLLM for tests)
         if self.llm_client is not None and hasattr(self.llm_client, "call"):
             thought, tool_calls = self.llm_client.call(messages, tools=TOOL_DEFINITIONS)
-            return thought, tool_calls, 100
+            return thought, tool_calls, 100, 0.0001
 
         # Live Groq client call
         client = self.reviewer._ensure_client()
@@ -89,7 +93,14 @@ class AgentRunner:
 
         choice = response.choices[0].message
         content = choice.content or ""
-        tokens = response.usage.total_tokens if response.usage else 0
+        p_tokens = getattr(response.usage, "prompt_tokens", 0) if response.usage else 0
+        c_tokens = getattr(response.usage, "completion_tokens", 0) if response.usage else 0
+        tokens = response.usage.total_tokens if response.usage else (p_tokens + c_tokens)
+
+        model_name = self.reviewer.model or "openai/gpt-oss-120b"
+        cost = calculate_cost_usd(model_name, p_tokens, c_tokens)
+        if tracker:
+            tracker.record_tokens(p_tokens, c_tokens, model=model_name)
 
         parsed_tool_calls: list[dict[str, Any]] = []
         if choice.tool_calls:
@@ -105,7 +116,7 @@ class AgentRunner:
                     }
                 )
 
-        return content, parsed_tool_calls, tokens
+        return content, parsed_tool_calls, tokens, cost
 
     def run(
         self,
@@ -114,6 +125,7 @@ class AgentRunner:
         repo: str = "",
         pr_title: str = "",
         pr_description: str = "",
+        tracker: TelemetryTracker | None = None,
     ) -> AgentState:
         """Execute the autonomous Plan-Act-Observe review cycle until conclusion or budget halt."""
         state = AgentState(
@@ -141,7 +153,13 @@ class AgentRunner:
         logger.info("Starting autonomous agent review loop for PR: %s", pr_title or "Untitled")
 
         while not state.is_finished:
-            thought, tool_calls, tokens = self._call_llm(messages)
+            if tracker:
+                with tracker.span(f"llm_step_{state.step_count + 1}", SpanType.LLM_REASONING):
+                    thought, tool_calls, tokens, step_cost = self._call_llm(
+                        messages, tracker=tracker
+                    )
+            else:
+                thought, tool_calls, tokens, step_cost = self._call_llm(messages)
 
             # If the model produced no tool calls, nudge it to conclude
             if not tool_calls:
@@ -185,6 +203,7 @@ class AgentRunner:
                     tool_name=tool_name,
                     tool_input=tool_input,
                     tokens=tokens,
+                    cost=step_cost,
                 )
                 if halt:
                     logger.warning("Agent terminated by budget guardrail: %s", reason)
@@ -198,15 +217,35 @@ class AgentRunner:
                 )
 
                 # 2. Execute Action
-                output = execute_tool(
-                    tool_name=tool_name,
-                    arguments=tool_input,
-                    state=state,
-                    repo_root=repo_root,
-                    verifier=self.verifier,
-                    proof_engine=self.proof_engine,
-                    memory_store=self.memory_store,
-                )
+                span_type = SpanType.TOOL_EXECUTION
+                if tool_name == "search_precedents":
+                    span_type = SpanType.MEMORY
+                elif tool_name == "verify_finding":
+                    span_type = SpanType.VERIFIER
+                elif tool_name == "run_reproduction_test":
+                    span_type = SpanType.SANDBOX
+
+                if tracker:
+                    with tracker.span(f"tool_{tool_name}", span_type, {"tool": tool_name}):
+                        output = execute_tool(
+                            tool_name=tool_name,
+                            arguments=tool_input,
+                            state=state,
+                            repo_root=repo_root,
+                            verifier=self.verifier,
+                            proof_engine=self.proof_engine,
+                            memory_store=self.memory_store,
+                        )
+                else:
+                    output = execute_tool(
+                        tool_name=tool_name,
+                        arguments=tool_input,
+                        state=state,
+                        repo_root=repo_root,
+                        verifier=self.verifier,
+                        proof_engine=self.proof_engine,
+                        memory_store=self.memory_store,
+                    )
 
                 # 3. Record in State Trace
                 output_summary = output[:200] + "..." if len(output) > 200 else output
@@ -248,6 +287,7 @@ class AgentRunner:
         repo: str = "",
         pr_title: str = "",
         pr_description: str = "",
+        tracker: TelemetryTracker | None = None,
     ) -> ReviewOutput:
         """Convenience method to execute review and return standard ReviewOutput."""
         state = self.run(
@@ -256,6 +296,7 @@ class AgentRunner:
             repo=repo,
             pr_title=pr_title,
             pr_description=pr_description,
+            tracker=tracker,
         )
 
         if self.enable_verifier and state.findings:
@@ -263,12 +304,27 @@ class AgentRunner:
                 "Executing adversarial verifier pass on %d findings...",
                 len(state.findings),
             )
-            verified_findings, _ = self.verifier.verify_findings(
-                findings=state.findings,
-                diff_text=diff_text,
-                pr_title=pr_title,
-                pr_description=pr_description,
-            )
+            initial_count = len(state.findings)
+            if tracker:
+                with tracker.span("adversarial_verifier_pass", SpanType.VERIFIER):
+                    verified_findings, _ = self.verifier.verify_findings(
+                        findings=state.findings,
+                        diff_text=diff_text,
+                        pr_title=pr_title,
+                        pr_description=pr_description,
+                    )
+                rejected = initial_count - len(verified_findings)
+                for _ in range(len(verified_findings)):
+                    tracker.record_finding_verification(passed=True)
+                for _ in range(rejected):
+                    tracker.record_finding_verification(passed=False)
+            else:
+                verified_findings, _ = self.verifier.verify_findings(
+                    findings=state.findings,
+                    diff_text=diff_text,
+                    pr_title=pr_title,
+                    pr_description=pr_description,
+                )
             state.findings = verified_findings
 
         if self.enable_reproduction and state.findings:
@@ -276,12 +332,28 @@ class AgentRunner:
                 "Executing sandbox reproduction pass on %d findings...",
                 len(state.findings),
             )
-            proven_findings = self.proof_engine.prove_findings(
-                findings=state.findings,
-                diff_text=diff_text,
-                repo_root=repo_root,
-            )
+            if tracker:
+                with tracker.span("sandbox_reproduction_pass", SpanType.SANDBOX):
+                    proven_findings = self.proof_engine.prove_findings(
+                        findings=state.findings,
+                        diff_text=diff_text,
+                        repo_root=repo_root,
+                    )
+                for f in proven_findings:
+                    if f.is_reproduced is not None:
+                        tracker.record_reproduction(succeeded=bool(f.is_reproduced))
+            else:
+                proven_findings = self.proof_engine.prove_findings(
+                    findings=state.findings,
+                    diff_text=diff_text,
+                    repo_root=repo_root,
+                )
             state.findings = proven_findings
+
+        if tracker:
+            for f in state.findings:
+                if f.citation:
+                    tracker.record_precedent_citation()
 
         return ReviewOutput(
             summary=state.final_summary,
